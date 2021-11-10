@@ -73,7 +73,6 @@ class Dataloader(Dataset):
         return volume, data.header['pixdim'][1:3]
 
 
-
 def minmaxnorm(volume):
     min = np.percentile(volume, 1)
     max = np.percentile(volume, 99)
