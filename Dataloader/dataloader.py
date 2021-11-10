@@ -9,10 +9,10 @@ from os import walk
 class Dataloader(Dataset):
     def __init__(self, data_info, ids, vol_path, seg_path=None):
         """
-        :param data_info: info of data used
-       :param ids: ids of data to be loaded
-       :param vol_path: dir of data
-       :param seg_path: path of segmentations (if training data)
+        :param data_info: info of data used (saved as dic in init_data.py)
+       :param ids: ids of data to be loaded as numerical list
+       :param vol_path: parent directory of data
+       :param seg_path: parent directory of segmentations (if training data)
         """
         self.data_info = data_info
         self.ids = ids
