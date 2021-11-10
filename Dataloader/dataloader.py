@@ -3,6 +3,7 @@ import nibabel as nib
 import numpy as np
 import cv2
 from torch.utils.data import Dataset
+from os import walk
 
 
 class Dataloader(Dataset):
@@ -24,45 +25,59 @@ class Dataloader(Dataset):
     def __getitem__(self, idx):
         if self.data_info["name"] == "MD_PROSTATE":
             filename = f"prostate_{self.ids[idx]:02d}.nii.gz"
-        # TODO add specialty other dataset
+            filename_seg = filename
+        elif self.data_info["name"] == "ACDC":
+            sub_folder = f"patient{self.ids[idx]:03d}"
+            filenames_dir = next(walk(os.path.join(str(self.vol_path), sub_folder)), (None, None, []))[2]
+            if f"patient{self.ids[idx]:03d}_frame01.nii.gz" in filenames_dir:
+                filename = f"{sub_folder}/patient{self.ids[idx]:03d}_frame01.nii.gz"
+                filename_seg = f"{sub_folder}/patient{self.ids[idx]:03d}_frame01_gt.nii.gz"
+            elif f"patient{self.ids[idx]:03d}_frame04.nii.gz" in filenames_dir:
+                filename = f"{sub_folder}/patient{self.ids[idx]:03d}_frame04.nii.gz"
+                filename_seg = f"{sub_folder}/patient{self.ids[idx]:03d}_frame04_gt.nii.gz"
+            else:
+                print(f"ERROR: no suitable file found for patient{self.ids[idx]:03d}")
 
         # combining path and loading volume
         volume_path = os.path.join(str(self.vol_path), filename)
 
         volume, resolution = self.read_volume(volume_path)
+        # print(volume.shape)
 
         # normalization
         volume = minmaxnorm(volume)
-        volume = re_sampling(volume, resolution, self.data_info["resolution"], self.data_info["dimension"])
+        # volume = re_sampling(volume, resolution, self.data_info["resolution"], self.data_info["dimension"])
 
         if self.seg_path is None:
             return volume
 
-        seg_path = os.path.join(str(self.seg_path), filename)
-        seg, resolution = self.read_volume(seg_path)
+        seg_path = os.path.join(str(self.seg_path), filename_seg)
+        seg, resolution = self.read_volume(seg_path, mask=True)
+        # print(seg.shape)
 
         # normalization
         seg = minmaxnorm(seg)
-        seg = re_sampling(seg, resolution, self.data_info["resolution"], self.data_info["dimension"])
+        # seg = re_sampling(seg, resolution, self.data_info["resolution"], self.data_info["dimension"])
 
         return volume, seg
 
-    def read_volume(self, path):
+    def read_volume(self, path, mask=False):
         # reads volume and returns
         data = nib.load(path)
+        volume = data.get_fdata()
+        # print("loaded data", path)
         # use the T2 image (modility: 0) of this dataset only
-        if self.data_info["name"] == "MD_PROSTATE":
-            volume = data.get_fdata()[:, :, :, 0]
-            volume = np.moveaxis(volume, -1, 0)
-            return volume, data.header['pixdim'][1:3]
-        # TODO add specialty other dataset
-        return
+        if self.data_info["name"] == "MD_PROSTATE" and mask is False:
+            volume = volume[:, :, :, 0]
+        volume = np.moveaxis(volume, -1, 0)
+        return volume, data.header['pixdim'][1:3]
+
 
 
 def minmaxnorm(volume):
     min = np.percentile(volume, 1)
     max = np.percentile(volume, 99)
-    return (volume - min) / (max - volume)
+    return (volume - min) / (max - min)
 
 
 def re_sampling(volume, res_old, res_new, dim_new):
