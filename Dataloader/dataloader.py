@@ -59,13 +59,18 @@ class Dataloader(Dataset):
                 volume = preprocess(volume, resolution, self.data_info["resolution"],
                                     self.data_info["dimension"], mask=False, affine=affine)
                 # volume = np.moveaxis(volume, 0, -1)
-                print("final volume", volume.shape)
                 self.save_volume(self.vol_path, f"{filename[:-7]}_prep.nii.gz", volume, affine)
 
             if self.__class__.__name__ == "DataloaderRandom":
                 processed_volume.extend(volume)
             else:
-                # TODO equal partition
+                pad = self.pad_frames - volume.shape[0]
+                if pad < 0:
+                    print("ERROR: padding must be increased!")
+                self.padding_list.append(pad)
+                padding = np.zeros((pad, volume.shape[1], volume.shape[2]))
+                volume = np.concatenate((volume, padding))
+                print("volume-shape", volume.shape)
                 processed_volume.append(volume)
 
             if self.seg_path is None:
@@ -83,13 +88,20 @@ class Dataloader(Dataset):
             if self.__class__.__name__ == "DataloaderRandom":
                 processed_seg.extend(seg)
             else:
-                # TODO equal partition
+                seg = np.concatenate((seg, padding))
+                print("seg-shape", seg.shape)
                 processed_seg.append(seg)
 
         processed_volume_complete = np.array(processed_volume)
+        if self.seg_path is None:
+            processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
+            print("final volume", processed_volume_complete.shape)
+            return processed_volume_complete
+
         processed_seg_complete = np.array(processed_seg)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
         processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+        print("final volume", processed_data_complete.shape)
         return processed_data_complete
 
     def read_volume(self, path, mask=False):
@@ -117,7 +129,7 @@ class Dataloader(Dataset):
         array_vol = nib.Nifti1Image(volume, affine)
         complete_path = os.path.join(str(path), filename)
         nib.save(array_vol, complete_path)
-        print(volume.shape, complete_path)
+        # print(volume.shape, complete_path)
 
 
 class DataloaderRandom(Dataloader):
@@ -134,6 +146,8 @@ class DataloaderRandom(Dataloader):
 
 class DataloaderCustom(Dataloader):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
+        self.pad_frames = 25
+        self.padding_list = []
         super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
         self.partition = partition
         print(data_info, "final shape", self.data.shape)
@@ -143,17 +157,38 @@ class DataloaderCustom(Dataloader):
 
     def __getitem__(self, idx):
         slices = self.data[idx]
-        # TODO drop empty slices
-        randomlist = random.sample(range(0, int(slices.shape[1] / self.partition)), self.partition)
-        print(randomlist)
-        random_slices = []
+        # remove padding
+
+        selected_slices = []
+        if self.seg_path is None:
+            no_all_slices = slices.shape[0]
+        else:
+            slices = slices[:, :-self.padding_list[idx]]
+            no_all_slices = slices[0].shape[0]
+
+        group_size = no_all_slices // self.partition
         for i in range(self.partition):
-            random_slices.append(slices[:, i * self.partition + i * randomlist])
+            # for last partition, take random slice until the end
+            if i == self.partition - 1:
+                random_slice_idx = random.randint(i*group_size, no_all_slices - 1)
+                # print(f"random value between {i * group_size} and {no_all_slices - 1} is {random_slice_idx}")
+            else:
+                random_slice_idx = random.randint(i*group_size, (i+1)*group_size - 1)
+                # print(f"random value between {i * group_size} and {(i + 1) * group_size - 1} is {random_slice_idx}")
 
-        print("slices", slices.shape, slices.shape[1], int(slices.shape[1] / self.partition))
+            if self.seg_path is None:
+                random_slice = slices[random_slice_idx]
+            else:
+                random_slice = slices[:, random_slice_idx]
+            selected_slices.append(random_slice)
 
-        # TODO get correct item, 1 item per partition
-        return self.data[idx]
+        selected_slices_complete = np.array(selected_slices)
+        if self.seg_path is not None:
+            selected_slices_complete = np.moveaxis(selected_slices_complete, 1, 0)
+
+        print("final slices", selected_slices_complete.shape)
+
+        return selected_slices_complete
 
 
 def preprocess(volume, res_old, res_new, dim_new, mask=False, affine=None):

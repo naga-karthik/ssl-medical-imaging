@@ -11,19 +11,21 @@ from Dataloader.init_data import md_prostate, acdc
 #    sample_label = test_labels[0]
 #    print(test_images.shape, test_labels.shape)
 
-test_loader = DataloaderRandom(acdc, [93], "../ACDC_dummy", preprocessed_data=False, seg_path="../ACDC_dummy")
+test_loader = DataloaderCustom(acdc, range(1,10), 3, "../ACDC", preprocessed_data=True) # , seg_path="../ACDC")
 
 for test_images, test_labels in test_loader:
     sample_image = test_images[0]
     sample_label = test_labels[0]
-    # print(test_images.shape, test_images.shape)
-    print(test_images[0][90])
+    print(test_images.shape, test_images.shape)
 
 
-test_loader = DataloaderRandom(md_prostate, [1], "../Task05_Prostate_dummy/images", preprocessed_data=True,
-                               seg_path="../Task05_Prostate_dummy/labels")
+# preprocess all data
+# test_loader = DataloaderRandom(acdc, range(1,100), "../ACDC", preprocessed_data=False, seg_path="../ACDC")
+# test_loader = DataloaderRandom(md_prostate, range(47), "../Task05_Prostate/images", preprocessed_data=False)
 
-for test_images, test_labels in test_loader:
-    sample_image = test_images[0]
-    sample_label = test_labels[0]
-    # print(test_images.shape, test_images.shape)
+# test_loader = DataloaderRandom(md_prostate, range(47), "../Task05_Prostate/images", preprocessed_data=False)
+
+# for test_images, test_labels in test_loader:
+#    sample_image = test_images[0]
+#    sample_label = test_labels[0]
+#    # print(test_images.shape, test_images.shape)
