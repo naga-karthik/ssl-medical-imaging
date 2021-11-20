@@ -22,87 +22,6 @@ class Dataloader(Dataset):
         self.vol_path = vol_path
         self.seg_path = seg_path
         self.preprocessed_data = preprocessed_data
-        self.data = self.load_data()
-
-    def load_data(self):
-        # addition to filename if loading pre-processed file
-        sub = ""
-        if self.preprocessed_data:
-            sub = "_prep"
-
-        processed_volume = []
-        processed_seg = []
-
-        for idx in self.ids:
-            if self.data_info["name"] == "MD_PROSTATE":
-                filename = f"prostate_{idx:02d}{sub}.nii.gz"
-                filename_seg = filename
-            elif self.data_info["name"] == "ACDC":
-                sub_folder = f"patient{idx:03d}"
-                filenames_dir = next(walk(os.path.join(str(self.vol_path), sub_folder)), (None, None, []))[2]
-                # load frame01 object, if not available frame04. Adapted according to implementation of authors
-                if f"patient{idx:03d}_frame01.nii.gz" in filenames_dir:
-                    filename = f"{sub_folder}/patient{idx:03d}_frame01{sub}.nii.gz"
-                    filename_seg = f"{sub_folder}/patient{idx:03d}_frame01_gt{sub}.nii.gz"
-                elif f"patient{idx:03d}_frame04.nii.gz" in filenames_dir:
-                    filename = f"{sub_folder}/patient{idx:03d}_frame04{sub}.nii.gz"
-                    filename_seg = f"{sub_folder}/patient{idx:03d}_frame04_gt{sub}.nii.gz"
-                else:
-                    print(f"ERROR: no suitable file found for patient{idx:03d}")
-
-            # combining path and loading volume
-            volume_path = os.path.join(str(self.vol_path), filename)
-            volume, resolution, affine = self.read_volume(volume_path)
-
-            # pre-process
-            if not self.preprocessed_data:
-                volume = preprocess(volume, resolution, self.data_info["resolution"],
-                                    self.data_info["dimension"], mask=False, affine=affine)
-                # volume = np.moveaxis(volume, 0, -1)
-                self.save_volume(self.vol_path, f"{filename[:-7]}_prep.nii.gz", volume, affine)
-
-            if self.__class__.__name__ == "DataloaderRandom":
-                processed_volume.extend(volume)
-            else:
-                pad = self.pad_frames - volume.shape[0]
-                if pad < 0:
-                    print("ERROR: padding must be increased!")
-                self.padding_list.append(pad)
-                padding = np.zeros((pad, volume.shape[1], volume.shape[2]))
-                volume = np.concatenate((volume, padding))
-                print("volume-shape", volume.shape)
-                processed_volume.append(volume)
-
-            if self.seg_path is None:
-                continue
-
-            seg_path = os.path.join(str(self.seg_path), filename_seg)
-            seg, resolution, affine = self.read_volume(seg_path, mask=True)
-
-            # pre-process
-            if not self.preprocessed_data:
-                seg = preprocess(seg, resolution, self.data_info["resolution"], self.data_info["dimension"],
-                                 mask=True, affine=affine)
-                self.save_volume(self.seg_path, f"{filename_seg[:-7]}_prep.nii.gz", volume, affine)
-
-            if self.__class__.__name__ == "DataloaderRandom":
-                processed_seg.extend(seg)
-            else:
-                seg = np.concatenate((seg, padding))
-                print("seg-shape", seg.shape)
-                processed_seg.append(seg)
-
-        processed_volume_complete = np.array(processed_volume)
-        if self.seg_path is None:
-            processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
-            print("final volume", processed_volume_complete.shape)
-            return processed_volume_complete
-
-        processed_seg_complete = np.array(processed_seg)
-        processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
-        processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
-        print("final volume", processed_data_complete.shape)
-        return processed_data_complete
 
     def read_volume(self, path, mask=False):
         # reads volume and returns
@@ -131,10 +50,54 @@ class Dataloader(Dataset):
         nib.save(array_vol, complete_path)
         # print(volume.shape, complete_path)
 
+    def get_filenames(self, idx):
+        # addition to filename if loading pre-processed file
+        sub = ""
+        if self.preprocessed_data:
+            sub = "_prep"
+
+        if self.data_info["name"] == "MD_PROSTATE":
+            filename = f"prostate_{idx:02d}{sub}.nii.gz"
+            filename_seg = filename
+        elif self.data_info["name"] == "ACDC":
+            sub_folder = f"patient{idx:03d}"
+            filenames_dir = next(walk(os.path.join(str(self.vol_path), sub_folder)), (None, None, []))[2]
+            # load frame01 object, if not available frame04. Adapted according to implementation of authors
+            if f"patient{idx:03d}_frame01.nii.gz" in filenames_dir:
+                filename = f"{sub_folder}/patient{idx:03d}_frame01{sub}.nii.gz"
+                filename_seg = f"{sub_folder}/patient{idx:03d}_frame01_gt{sub}.nii.gz"
+            elif f"patient{idx:03d}_frame04.nii.gz" in filenames_dir:
+                filename = f"{sub_folder}/patient{idx:03d}_frame04{sub}.nii.gz"
+                filename_seg = f"{sub_folder}/patient{idx:03d}_frame04_gt{sub}.nii.gz"
+            else:
+                print(f"ERROR: no suitable file found for patient{idx:03d}")
+
+        return filename, filename_seg
+
+    def get_processed_data(self, filename, path, mask):
+        # compute path
+        full_path = os.path.join(str(path), filename)
+        data, resolution, affine = self.read_volume(full_path, mask=mask)
+
+        # pre-process
+        if not self.preprocessed_data:
+            data = preprocess(data, resolution, self.data_info["resolution"], self.data_info["dimension"],
+                              mask=mask, affine=affine)
+            self.save_volume(path, f"{filename[:-7]}_prep.nii.gz", data, affine)
+
+        return data
+
+    def get_processed_volume(self, filename):
+        return self.get_processed_data(filename, self.vol_path, False)
+
+    def get_processed_seg(self, filename_seg):
+        return self.get_processed_data(filename_seg, self.seg_path, True)
+
 
 class DataloaderRandom(Dataloader):
     def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
         super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
+        self.data = self.load_data()
         print(data_info, "final shape", self.data.shape)
 
     def __len__(self):
@@ -143,6 +106,38 @@ class DataloaderRandom(Dataloader):
     def __getitem__(self, idx):
         return self.data[idx]
 
+    def load_data(self):
+
+        processed_volume = []
+        processed_seg = []
+
+        for idx in self.ids:
+
+            filename, filename_seg = self.get_filenames(idx)
+
+            volume = self.get_processed_volume(filename)
+
+            processed_volume.extend(volume)
+
+            if self.seg_path is None:
+                continue
+
+            seg = self.get_processed_seg(filename_seg)
+
+            processed_seg.extend(seg)
+
+        processed_volume_complete = np.array(processed_volume)
+        if self.seg_path is None:
+            print("final volume", processed_volume_complete.shape)
+            return processed_volume_complete
+
+        processed_seg_complete = np.array(processed_seg)
+        print(processed_volume_complete.shape, processed_seg_complete.shape)
+        processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
+        processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+        print("final volume", processed_data_complete.shape)
+        return processed_data_complete
+
 
 class DataloaderCustom(Dataloader):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
@@ -150,6 +145,7 @@ class DataloaderCustom(Dataloader):
         self.padding_list = []
         super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
         self.partition = partition
+        self.data = self.load_data()
         print(data_info, "final shape", self.data.shape)
 
     def __len__(self):
@@ -157,38 +153,74 @@ class DataloaderCustom(Dataloader):
 
     def __getitem__(self, idx):
         slices = self.data[idx]
+
         # remove padding
+        slices = slices[:, :-self.padding_list[idx]]
+        no_all_slices = slices[0].shape[0]
 
         selected_slices = []
-        if self.seg_path is None:
-            no_all_slices = slices.shape[0]
-        else:
-            slices = slices[:, :-self.padding_list[idx]]
-            no_all_slices = slices[0].shape[0]
-
         group_size = no_all_slices // self.partition
         for i in range(self.partition):
             # for last partition, take random slice until the end
             if i == self.partition - 1:
-                random_slice_idx = random.randint(i*group_size, no_all_slices - 1)
+                random_slice_idx = random.randint(i * group_size, no_all_slices - 1)
                 # print(f"random value between {i * group_size} and {no_all_slices - 1} is {random_slice_idx}")
             else:
-                random_slice_idx = random.randint(i*group_size, (i+1)*group_size - 1)
+                random_slice_idx = random.randint(i * group_size, (i + 1) * group_size - 1)
                 # print(f"random value between {i * group_size} and {(i + 1) * group_size - 1} is {random_slice_idx}")
 
-            if self.seg_path is None:
-                random_slice = slices[random_slice_idx]
-            else:
-                random_slice = slices[:, random_slice_idx]
+            random_slice = slices[:, random_slice_idx]
             selected_slices.append(random_slice)
 
         selected_slices_complete = np.array(selected_slices)
-        if self.seg_path is not None:
-            selected_slices_complete = np.moveaxis(selected_slices_complete, 1, 0)
 
-        print("final slices", selected_slices_complete.shape)
+        if self.seg_path is None:
+            # print("final slices", selected_slices_complete[:, 0].shape)
+            return selected_slices_complete[:, 0]
 
-        return selected_slices_complete
+        return selected_slices_complete[:, 0], selected_slices_complete[:, 1]
+
+    def load_data(self):
+
+        processed_volume = []
+        processed_seg = []
+
+        for idx in self.ids:
+
+            filename, filename_seg = self.get_filenames(idx)
+
+            volume = self.get_processed_volume(filename)
+
+            pad = self.pad_frames - volume.shape[0]
+            if pad < 0:
+                print("ERROR: padding must be increased!")
+            self.padding_list.append(pad)
+            padding = np.zeros((pad, volume.shape[1], volume.shape[2]))
+            volume = np.concatenate((volume, padding))
+            # print("volume-shape", volume.shape)
+            processed_volume.append(volume)
+
+            if self.seg_path is None:
+                continue
+
+            seg = self.get_processed_seg(filename_seg)
+
+            seg = np.concatenate((seg, padding))
+            # print("seg-shape", seg.shape)
+            processed_seg.append(seg)
+
+        processed_volume_complete = np.array(processed_volume)
+        if self.seg_path is None:
+            processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
+            processed_volume_complete = np.moveaxis(processed_volume_complete, 1, 0)
+            print("final volume", processed_volume_complete.shape)
+            return processed_volume_complete
+
+        processed_seg_complete = np.array(processed_seg)
+        processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
+        processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+        print("final volume + seg", processed_data_complete.shape)
+        return processed_data_complete
 
 
 def preprocess(volume, res_old, res_new, dim_new, mask=False, affine=None):
