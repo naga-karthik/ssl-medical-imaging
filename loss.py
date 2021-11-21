@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as f
+import seg_models
 
 '''loss_type is 0 for global, 1 for Gd- and 2 for Gd'''
 class Loss:
@@ -14,9 +15,30 @@ class Loss:
         vect2_norm = torch.transpose(f.normalize(vect2, dim=-1, p=2), -1, -2)
         return torch.matmul(vect1_norm, vect2_norm)
 
+    def create_augmented_mini_batch_and_latents(self):
+        # based on 4x1x192x192 image per volume: we have n volumes, s partitions, r image width, c image height
+        n, s, l, r, c = self.mini_batch.shape
+        augmented_images = torch.zeros(2*n, s, l, r, c)
+        latents = torch.zeros((2 * n, s, 128))
+
+        for vol in range(n):
+            # TODO: select augmentations and augment.  output: augment1, augment2, the two different augmentations of the same source image
+            augment1 = torch.randn(s, l, r, c) # placeholder
+            augment2 = torch.randn(s, l, r, c)  # placeholder
+            model = seg_models.SegUnetEncoder_and_ProjectorG1(in_channels=1, base_n_filter=4, g1_out_dim=128)
+            _, latent1, _, _ = model(augment1)
+            _, latent2, _, _ = model(augment2)
+            augmented_images[vol * 2, :, :, :, :] = augment1
+            augmented_images[(vol * 2) + 1, :, :, :, :] = augment2
+            latents[vol*2, :, :] = latent1
+            latents[(vol*2)+1, :, :] = latent2
+
+        return augmented_images, latents
+
     def create_pos_neg(self):
         pos = torch.empty_like(self.mini_batch)
         neg = torch.empty_like(self.mini_batch)
+
 
         # TODO: create pos and neg samples, need to access augmentations or will they be pre computed in the passed minibatch?
         if self.loss_type == 1:
@@ -40,3 +62,10 @@ class Loss:
         else:
             # TODO: global loss implementation (L_g)
             pass
+
+# testing with random inputs
+if __name__ == "__main__":
+    # assuming 4 volumes, 4 partitions, 1 label, 192 image width, 192 image height
+    global_loss = Loss(loss_type=0, mini_batch=torch.randn(4, 4, 1, 192, 192))
+    augmented, latents = global_loss.create_augmented_mini_batch_and_latents()
+    print(f'interested in projector output should be 8x4x128.  result: {latents.shape}')
