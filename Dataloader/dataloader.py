@@ -104,8 +104,7 @@ class DataloaderRandom(Dataloader):
         return len(self.ids)
 
     def __getitem__(self, idx):
-        slice = np.expand_dims(self.data[idx], axis=1)
-        return slice
+        return self.data[idx][:,  None, :]
 
     def load_data(self):
 
@@ -129,14 +128,14 @@ class DataloaderRandom(Dataloader):
 
         processed_volume_complete = np.array(processed_volume)
         if self.seg_path is None:
-            print("final volume", processed_volume_complete.shape)
+            # print("final volume", processed_volume_complete.shape)
             return processed_volume_complete
 
         processed_seg_complete = np.array(processed_seg)
-        print(processed_volume_complete.shape, processed_seg_complete.shape)
+        # print(processed_volume_complete.shape, processed_seg_complete.shape)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
         processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
-        print("final volume", processed_data_complete.shape)
+        # print("final volume", processed_data_complete.shape)
         return processed_data_complete
 
 
@@ -175,7 +174,7 @@ class DataloaderCustom(Dataloader):
 
         selected_slices_complete = np.array(selected_slices)
 
-        selected_slices_complete = np.expand_dims(selected_slices_complete, axis=2)
+        selected_slices_complete = selected_slices_complete[:,:,None,:,:]
 
         if self.seg_path is None:
             # print("final slices", selected_slices_complete[:, 0].shape)
@@ -216,13 +215,13 @@ class DataloaderCustom(Dataloader):
         if self.seg_path is None:
             processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
             processed_volume_complete = np.moveaxis(processed_volume_complete, 1, 0)
-            print("final volume", processed_volume_complete.shape)
+            # print("final volume", processed_volume_complete.shape)
             return processed_volume_complete
 
         processed_seg_complete = np.array(processed_seg)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
         processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
-        print("final volume + seg", processed_data_complete.shape)
+        # print("final volume + seg", processed_data_complete.shape)
         return processed_data_complete
 
 

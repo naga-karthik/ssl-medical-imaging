@@ -17,12 +17,12 @@ test = True
 if test:
     for test_images in test_loader:
         sample_image = test_images[0]
-        print("test image", test_images.shape)
+        # print("test image", test_images.shape)
 else:
     for test_images, test_labels in test_loader:
         sample_image = test_images[0]
         sample_label = test_labels[0]
-        print(test_images.shape, test_labels.shape)
+        # print(test_images.shape, test_labels.shape)
 
 
 # preprocess all data
@@ -35,4 +35,4 @@ test_loader = DataloaderRandom(md_prostate, range(3), "../Task05_Prostate/images
 for test_images, test_labels in test_loader:
     sample_image = test_images[0]
     sample_label = test_labels[0]
-    print(test_images.shape, test_labels.shape)
+    # print(test_images.shape, test_labels.shape)
