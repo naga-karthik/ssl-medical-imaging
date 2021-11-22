@@ -125,6 +125,7 @@ class DataloaderRandom(Dataloader):
             seg = self.get_processed_seg(filename_seg)
 
             processed_seg.extend(seg)
+            # print(idx, seg.shape, volume.shape)
 
         processed_volume_complete = np.array(processed_volume)
         if self.seg_path is None:
