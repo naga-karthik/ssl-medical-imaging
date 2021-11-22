@@ -104,7 +104,8 @@ class DataloaderRandom(Dataloader):
         return len(self.ids)
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        slice = np.expand_dims(self.data[idx], axis=1)
+        return slice
 
     def load_data(self):
 
@@ -173,6 +174,8 @@ class DataloaderCustom(Dataloader):
             selected_slices.append(random_slice)
 
         selected_slices_complete = np.array(selected_slices)
+
+        selected_slices_complete = np.expand_dims(selected_slices_complete, axis=2)
 
         if self.seg_path is None:
             # print("final slices", selected_slices_complete[:, 0].shape)

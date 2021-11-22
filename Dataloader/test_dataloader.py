@@ -1,5 +1,5 @@
-from Dataloader.dataloader import DataloaderCustom, DataloaderRandom
-from Dataloader.init_data import md_prostate, acdc
+from dataloader import DataloaderCustom, DataloaderRandom
+from init_data import md_prostate, acdc
 
 # test_loader = DataloaderCustom(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False, seg_path="../Task05_Prostate/labels")
 
