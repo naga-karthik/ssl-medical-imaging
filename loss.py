@@ -9,18 +9,18 @@ Inputs:
     decoder_strategy: 0 for random (default), 1 for Lr, 2 for Ld
 '''
 class Loss:
-    def __init__(self, mini_batch, loss_type=0, encoder_strategy=0, decoder_strategy=0):
+    def __init__(self, loss_type=0, encoder_strategy=0, decoder_strategy=0):
         self.decoder_strategy = decoder_strategy
         self.encoder_strategy = encoder_strategy
         self.loss_type = loss_type
         self.tau = 0.1
-        self.mini_batch = mini_batch
 
     def dice_loss(self, prediction, target):
+        print(f'prediction: {prediction.shape}, target: {target.shape}')
         pflat = prediction.view(-1)
         tflat = target.view(-1)
-        intersection = (pflat * tflat).sum(dim=[1,2])
-        score = (2.0 * intersection + 1.0) / (pflat.sum(dim=[1,2]) + tflat.sum(dim=[1,2]) + 1.0)
+        intersection = (pflat * tflat).sum()
+        score = (2.0 * intersection + 1.0) / (pflat.sum() + tflat.sum() + 1.0)
 
         return 1.0 - torch.mean(score)
 
@@ -29,11 +29,11 @@ class Loss:
         vect2_norm = torch.transpose(f.normalize(vect2, dim=-1, p=2), -1, -2)
         return torch.matmul(vect1_norm, vect2_norm)
 
-    def create_pos_set(self):
+    def create_pos_set(self, mini_batch):
         # based on nx1x192x192 images per batch: we have n images (n=vol*partition), r image width, c image height
         # assuming with augmentations minibatch dimensions will be 3nx1x192x192
         # image 3*n-2 is unaugmented, 3*n-1 is augmentation 1 and 3*n is augmentation 3*n
-        n, l, r, c = self.mini_batch.shape
+        n, l, r, c = mini_batch.shape
 
         if self.loss_type == 1:
             # dimensions: num_pos_combosxindividual_laternt_in_each_comboxlatent_dim
@@ -45,7 +45,7 @@ class Loss:
                 pos = torch.zeros((n/3)*4, 2, 128)
 
             model = seg_models.SegUnetEncoder_and_ProjectorG1()
-            latents = model(self.mini_batch)  # should be nx128 returned
+            latents = model(mini_batch)  # should be nx128 returned
             for i in range(n/3):
                 if self.encoder_strategy == 1:
                     pairs = torch.zeros(1, 2, 128)
@@ -124,13 +124,11 @@ if __name__ == "__main__":
     fc_units = [3200, 1024]
     g1_out_dim = 128
     num_classes = 1
-    encoder_model = seg_models.SegUnetEncoder_and_ProjectorG1(in_channels=1, g1_out_dim=128, num_filters_list=num_filters, fc_units_list=fc_units)
-    decoder_model = seg_models.SegUnetDecoder(num_filters_list=num_filters)
     full_model = seg_models.SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
     _, output = full_model(mini_batch=torch.randn(8, 1, 192, 192))
 
 
-    label = torch.rand(8)
+    '''ground_truth_masks = torch.randn(8, 1, 192, 192)
     dice_loss = Loss(mini_batch=torch.randn(8, 1, 192, 192), loss_type=0, encoder_strategy=0, decoder_strategy=0)
-    loss = dice_loss.compute(output, label)
-    print(f'computed loss: {loss}')
+    loss = dice_loss.compute(output, ground_truth_masks)
+    print(f'computed loss: {loss}')'''

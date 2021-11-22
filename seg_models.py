@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.nn.modules.activation import ReLU
-
+import loss
 
 def conv_bnorm_relu(in_feats, out_feats):
     return nn.Sequential(
@@ -251,6 +251,10 @@ if __name__ == "__main__":
     logits, out_final = full_model(input_img)
     print(f"full model logits shape: {logits.shape}")
 
+    dice_loss = loss.Loss(mini_batch=torch.randn(8, 1, 192, 192), loss_type=0, encoder_strategy=0, decoder_strategy=0)
+    ground_truth_masks = torch.randn(8, 1, 192, 192)
+    loss = dice_loss.compute(out_final, ground_truth_masks)
+    print(f'computed loss: {loss}')
 
 
 
