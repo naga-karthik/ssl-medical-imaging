@@ -15,14 +15,31 @@ class Loss:
         self.loss_type = loss_type
         self.tau = 0.1
 
-    def dice_loss(self, prediction, target):
-        print(f'prediction: {prediction.shape}, target: {target.shape}')
-        pflat = prediction.view(-1)
-        tflat = target.view(-1)
-        intersection = (pflat * tflat).sum()
-        score = (2.0 * intersection + 1.0) / (pflat.sum() + tflat.sum() + 1.0)
+    def one_hot(self, arr, num_classes):
+        n = arr.shape[0]
+        reformat = torch.zeros(n, num_classes)
+        i = 0
+        while i < n:
+            reformat[i][arr[i]] = 1
+            i += 1
+        return reformat
 
-        return 1.0 - torch.mean(score)
+    def dice_loss(self, prediction, target):
+        # should output number of unique classes
+        classes = torch.unique(target)
+        c = classes.shape[0]
+        pflat = prediction.view(-1)
+        pflat_one_hot = self.one_hot(pflat, c)
+        tflat = target.view(-1)
+        tflat_one_hot = self.one_hot(tflat, c)
+        final_score = 0
+
+        for i in range(c):
+            intersection = (pflat_one_hot[i] * tflat_one_hot[i]).sum()
+            score = (2.0 * intersection + 1.0) / (pflat_one_hot[i].sum() + tflat_one_hot[i].sum() + 1.0)
+            final_score += torch.mean(score)
+
+        return 1.0 - final_score
 
     def cos_sim(self, vect1, vect2):
         vect1_norm = f.normalize(vect1, dim=-1, p=2)
@@ -30,7 +47,7 @@ class Loss:
         return torch.matmul(vect1_norm, vect2_norm)
 
     def create_pos_set(self, latent_mini_batch):
-        # based on being passes output of g1(e())
+        # based on being passed output of g1(e())
         # image 3*n-3 is unaugmented, 3*n-2 is augmentation 1 and 3*n is augmentation 3*n-1
         # array augmentation_type contains on entry per sample specifying the augmentation type: 0=none, 1=type1, 2 = type2
         n, c = latent_mini_batch.shape
