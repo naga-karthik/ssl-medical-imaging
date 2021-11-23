@@ -151,7 +151,7 @@ class DataloaderCustom(Dataloader):
         print(data_info, "final shape", self.data.shape)
 
     def __len__(self):
-        return len(self.data)
+        return len(self.ids)
 
     def __getitem__(self, idx):
         slices = self.data[idx]
