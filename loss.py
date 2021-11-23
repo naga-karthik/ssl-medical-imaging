@@ -105,21 +105,22 @@ class Loss:
         n, _, _ = prediction.shape
         loss = 0
         pos_set, augmentations = self.create_pos_set(prediction)
-        for i in range(n):
+        m, _, _ = pos_set.shape
+        for i in range(m):
             neg_set = self.create_neg_set(prediction, i, augmentations[i, 0])
             l1 = self.individual_global_loss(pos_set[i, 1, :], pos_set[i, 2, :], neg_set)
             neg_set = self.create_neg_set(prediction, i, augmentations[i, 1])
             l2 = self.individual_global_loss(pos_set[i, 2, :], pos_set[i, 1, :], neg_set)
             loss += l1+l2
 
-        return loss / n
+        return loss / m
 
 
     def local_loss(self, prediction):
         # TODO: local loss implementation (L_l)
         pass
 
-    def compute(self, prediction, target):
+    def compute(self, prediction, target=None):
         if self.loss_type == 0:
             return self.dice_loss(prediction, target)
         if self.loss_type == 1:
