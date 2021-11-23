@@ -1,5 +1,5 @@
+# adapted from https://github.com/krishnabits001/domain_specific_cl/blob/main/experiment_init/data_cfg_prostate_md.py
 import sys
-
 
 def train_data(no_of_tr_imgs, comb_of_tr_imgs):
     # print('train set list')
