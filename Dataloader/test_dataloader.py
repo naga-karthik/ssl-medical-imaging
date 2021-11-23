@@ -14,7 +14,7 @@ import Dataloader.experiments_paper.data_init_acdc, Dataloader.experiments_paper
 #    sample_label = test_labels[0]
 #    print(test_images.shape, test_labels.shape)
 
-
+"""
 no_of_tr_imgs = 'tr1'
 # change this to 'c1', 'c2', 'cr3', 'cr4', 'cr5'
 comb_of_tr_imgs = 'c1'
@@ -77,14 +77,43 @@ else:
         plt.imshow(np.moveaxis(sample_label, 0, -1))
         # plt.show()
         # print(test_images.shape, test_labels.shape)
-
+        # test_loader = DataloaderCustom(acdc, range(1,2), 4, "../ACDC", preprocessed_data=False, seg_path="../ACDC")
+"""
 # preprocess all data
-# test_loader = DataloaderRandom(acdc, range(1,101), "../ACDC", preprocessed_data=False, seg_path="../ACDC")
-# test_loader = DataloaderRandom(md_prostate, range(47), "../Task05_Prostate/images", preprocessed_data=False)
-# test_loader = DataloaderRandom(md_prostate, [0, 1, 2, 4, 6, 7, 10, 13, 14, 16, 17, 18, 20, 21, 24, 25, 28, 29,
-#                                             31, 32, 34, 35, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47],
-#                               "../Task05_Prostate/images", preprocessed_data=False, seg_path="../Task05_Prostate"
-#                                                                                              "/labels")
+
+test_loader = DataloaderRandom(acdc, range(1,101), "../ACDC", preprocessed_data=False, seg_path="../ACDC")
+test_loader = DataloaderRandom(md_prostate, range(47), "../Task05_Prostate/images", preprocessed_data=False)
+test_loader = DataloaderRandom(md_prostate, [0, 1, 2, 4, 6, 7, 10, 13, 14, 16, 17, 18, 20, 21, 24, 25, 28, 29,
+                                             31, 32, 34, 35, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47],
+                               "../Task05_Prostate/images", preprocessed_data=False, seg_path="../Task05_Prostate"
+                                                                                            "/labels")
+max = -1
+i = 0
+
+print(np.unique(test_loader.data[:, 1]))
+
+for test_images, test_labels in test_loader:
+    print(test_images.shape, test_labels.shape)
+    break
+    sample_image = test_images[0]
+    sample_label = test_labels[0]
+    sample_max = len(np.unique(test_labels))
+    if sample_max > max:
+        if sample_max < 10:
+            # print(sample_max, i)
+            max = sample_max
+            print(np.unique(test_labels))
+
+    if sample_max > 10:
+        print(sample_max, i)
+        plt.imshow(np.moveaxis(sample_image, 0, -1))
+        plt.show()
+        plt.imshow(np.moveaxis(sample_label, 0, -1))
+        plt.show()
+
+    i += 1
+
+print(max)
 
 # plt.show()
 # print(test_images.shape, test_labels.shape)

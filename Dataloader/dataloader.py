@@ -104,7 +104,8 @@ class DataloaderRandom(Dataloader):
         return len(self.ids)
 
     def __getitem__(self, idx):
-        return self.data[idx][:,  None, :]
+        # print(self.data[idx][1, None, :].shape)
+        return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
 
     def load_data(self):
 
@@ -125,7 +126,7 @@ class DataloaderRandom(Dataloader):
             seg = self.get_processed_seg(filename_seg)
 
             processed_seg.extend(seg)
-            # print(idx, seg.shape, volume.shape)
+            # print(idx, len(processed_volume))
 
         processed_volume_complete = np.array(processed_volume)
         if self.seg_path is None:
@@ -150,7 +151,7 @@ class DataloaderCustom(Dataloader):
         print(data_info, "final shape", self.data.shape)
 
     def __len__(self):
-        return len(self.ids)
+        return len(self.data)
 
     def __getitem__(self, idx):
         slices = self.data[idx]
@@ -175,13 +176,14 @@ class DataloaderCustom(Dataloader):
 
         selected_slices_complete = np.array(selected_slices)
 
-        selected_slices_complete = selected_slices_complete[:,:,None,:,:]
+        selected_slices_complete = selected_slices_complete[:, :, None, :, :]
 
         if self.seg_path is None:
             # print("final slices", selected_slices_complete[:, 0].shape)
             return selected_slices_complete[:, 0]
 
-        return selected_slices_complete[:, 0], selected_slices_complete[:, 1]
+        return selected_slices_complete[:, 0], one_hot_encoding(selected_slices_complete[:, 1],
+                                                                self.data_info["num_class"], True)
 
     def load_data(self):
 
@@ -227,7 +229,8 @@ class DataloaderCustom(Dataloader):
 
 
 def preprocess(volume, res_old, res_new, dim_new, mask=False, affine=None):
-    volume = minmaxnorm(volume)
+    if not mask:
+        volume = minmaxnorm(volume)
     volume = re_sampling(volume, res_old, res_new, dim_new, mask, affine)
     return volume
 
@@ -290,3 +293,17 @@ def crop_or_pad(slice, dim_new):
         slice_new[x_c:x_c + x, y_c:y_c + y] = slice[:, :]
 
     return slice_new
+
+
+def one_hot_encoding(seg, nb_classes, custom=False):
+    # print(seg.shape, seg.max())
+    # res = np.eye(nb_classes)[np.array(seg[0]).reshape(-1)]
+    # seg = res.reshape(list(seg[0].shape) + [nb_classes])
+    if custom:
+        seg = (np.arange(nb_classes) == seg[:,0,..., None] - 1).astype(int)
+    else:
+        seg = (np.arange(nb_classes) == seg[0,..., None] - 1).astype(int)
+    seg = np.moveaxis(seg, -1, 0)
+    # seg = np.eye(nb_classes)[seg[0]]
+    # print(seg.shape, seg.max())
+    return seg
