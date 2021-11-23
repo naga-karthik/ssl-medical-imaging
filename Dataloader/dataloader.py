@@ -101,7 +101,7 @@ class DataloaderRandom(Dataloader):
         print(data_info, "final shape", self.data.shape)
 
     def __len__(self):
-        return len(self.ids)
+        return len(self.data)
 
     def __getitem__(self, idx):
         # print(self.data[idx][1, None, :].shape)
