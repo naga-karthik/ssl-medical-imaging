@@ -37,9 +37,9 @@ class Loss:
         for i in range(c):
             intersection = (pflat_one_hot[i] * tflat_one_hot[i]).sum()
             score = (2.0 * intersection + 1.0) / (pflat_one_hot[i].sum() + tflat_one_hot[i].sum() + 1.0)
-            final_score += torch.mean(score)
+            final_score += score
 
-        return 1.0 - final_score
+        return 1.0 - (final_score / c )
 
     def cos_sim(self, vect1, vect2):
         vect1_norm = f.normalize(vect1, dim=-1, p=2)
