@@ -207,7 +207,7 @@ class SegUnetDecoder(nn.Module):
         logits = self.conv2d_fin(out)
 
         # final activation layer
-        out_final = F.softmax(out, dim=1)
+        out_final = F.softmax(logits, dim=1)
 
         return logits, out_final
 
@@ -250,7 +250,6 @@ if __name__ == "__main__":
     full_model = SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
     logits, out_final = full_model(input_img)
     print(f"full model logits shape: {logits.shape}")
-
 
 
 
