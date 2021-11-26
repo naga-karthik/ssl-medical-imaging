@@ -250,11 +250,12 @@ if __name__ == "__main__":
     full_model = SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
     logits, out_final = full_model(input_img)
     print(f"full model logits shape: {logits.shape}")
+    print(f"full model out_final shape: {out_final.shape}")
 
-    dice_loss = loss.Loss(mini_batch=torch.randn(8, 1, 192, 192), loss_type=0, encoder_strategy=0, decoder_strategy=0)
+    '''dice_loss = loss.Loss(loss_type=0, encoder_strategy=0, decoder_strategy=0)
     ground_truth_masks = torch.randn(8, 1, 192, 192)
     loss = dice_loss.compute(out_final, ground_truth_masks)
-    print(f'computed loss: {loss}')
+    print(f'computed loss: {loss}')'''
 
 
 

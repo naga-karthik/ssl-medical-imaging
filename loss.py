@@ -17,29 +17,26 @@ class Loss:
 
     def one_hot(self, arr, num_classes):
         n = arr.shape[0]
-        reformat = torch.zeros(n, num_classes)
-        i = 0
-        while i < n:
-            reformat[i][arr[i]] = 1
-            i += 1
+
+        reformat = torch.zeros((n, num_classes + 1))
+        reformat[torch.arange(n), arr] = 1
         return reformat
 
     def dice_loss(self, prediction, target):
+        epsilon = 1e-10
         # should output number of unique classes
         classes = torch.unique(target)
         c = classes.shape[0]
-        pflat = prediction.view(-1)
-        pflat_one_hot = self.one_hot(pflat, c)
         tflat = target.view(-1)
         tflat_one_hot = self.one_hot(tflat, c)
-        final_score = 0
+        pflat_softmax = prediction.view(-1, c)
 
-        for i in range(c):
-            intersection = (pflat_one_hot[i] * tflat_one_hot[i]).sum()
-            score = (2.0 * intersection + 1.0) / (pflat_one_hot[i].sum() + tflat_one_hot[i].sum() + 1.0)
-            final_score += score
+        intersection_of_label_with_image = torch.sum(torch.mul(tflat_one_hot, pflat_softmax), dim=[1, 2])
+        total_p = torch.sum(pflat_softmax, dim=[1, 2])
+        total_r = torch.sum(tflat_one_hot, dim=[1, 2])
+        dices = (2.0 * intersection_of_label_with_image) / (total_r + total_p + epsilon)
 
-        return 1.0 - (final_score / c )
+        return 1.0 - torch.mean(dices)
 
     def cos_sim(self, vect1, vect2):
         vect1_norm = f.normalize(vect1, dim=-1, p=2)
@@ -147,13 +144,16 @@ class Loss:
 
 # testing with random inputs
 if __name__ == "__main__":
-    in_channels = 1
+    '''in_channels = 1
     num_filters = [1, 16, 32, 64, 128, 128]
     fc_units = [3200, 1024]
     g1_out_dim = 128
     num_classes = 1
     full_model = seg_models.SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
-    _, output = full_model(mini_batch=torch.randn(8, 1, 192, 192))
+    _, output = full_model(mini_batch=torch.randn(8, 1, 192, 192))'''
+    test = torch.tensor([2, 1, 2, 1, 0,1, 1, 0, 2, 2])
+    loss = Loss()
+    print(loss.one_hot(test, 3))
 
 
     '''ground_truth_masks = torch.randn(8, 1, 192, 192)
