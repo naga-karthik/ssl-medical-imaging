@@ -57,7 +57,7 @@ cfg = {
             'eta_min': 1e-5
         },
         # hardware
-        'num_gpus': 2,
+        'num_gpus': 1,
     }
 cfg = Box(cfg)
 
@@ -82,20 +82,23 @@ class SegModel(pl.LightningModule):
         self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=False, seg_path=self.cfg.seg_path)
         self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=False, seg_path=self.cfg.seg_path)
         
+        self.loss = nn.CrossEntropyLoss()
+        
     def forward(self, x):
         return self.net(x)
     
+    def get_loss(self, batch):
+        pred = self.forward(batch[0])
+        loss = self.loss(pred, batch[1])
+        
     def training_step(self, batch, batch_nb):
-        loss = ...
-        return {'train_loss' : loss}
+        return {'train_loss' : self.get_loss(batch)}
 
     def validation_step(self, batch, batch_nb):
-        dice = ...
-        return {'valid_dice' : dice}
+        return {'valid_loss' : self.get_loss(batch)}
     
     def test_step(self, batch, batch_nb):
-        dice = ...
-        return {'test_dice' : dice}
+        return {'test_loss' : self.get_loss(batch)}
 
     def configure_optimizers(self):
         optimizer = eval(self.cfg.opt)(
