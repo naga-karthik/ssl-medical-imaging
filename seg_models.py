@@ -27,7 +27,7 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
     def __init__(self, in_channels=1, num_filters_list=[1, 16, 32, 64, 128, 128], fc_units_list=[3200, 1024], g1_out_dim=128):
         super(SegUnetEncoder_and_ProjectorG1, self).__init__()
         self.in_channels = in_channels
-        self.num_filters_list = num_filters_list
+        self.num_filters = num_filters_list
         self.context_features_list = []     # storing context features for concatenating between the encoder and decoder (like in standard UNet)
 
         self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
@@ -207,7 +207,7 @@ class SegUnetDecoder(nn.Module):
         logits = self.conv2d_fin(out)
 
         # final activation layer
-        out_final = F.softmax(out, dim=1)
+        out_final = F.softmax(logits, dim=1)
 
         return logits, out_final
 
@@ -250,12 +250,7 @@ if __name__ == "__main__":
     full_model = SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
     logits, out_final = full_model(input_img)
     print(f"full model logits shape: {logits.shape}")
-    print(f"full model out_final shape: {out_final.shape}")
 
-    '''dice_loss = loss.Loss(loss_type=0, encoder_strategy=0, decoder_strategy=0)
-    ground_truth_masks = torch.randn(8, 1, 192, 192)
-    loss = dice_loss.compute(out_final, ground_truth_masks)
-    print(f'computed loss: {loss}')'''
 
 
 
