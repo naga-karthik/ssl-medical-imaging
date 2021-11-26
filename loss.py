@@ -18,7 +18,7 @@ class Loss:
     def one_hot(self, arr, num_classes):
         n = arr.shape[0]
 
-        reformat = torch.zeros((n, num_classes + 1))
+        reformat = torch.zeros((n, num_classes))
         reformat[torch.arange(n), arr] = 1
         return reformat
 
@@ -30,6 +30,7 @@ class Loss:
         tflat = target.view(-1)
         tflat_one_hot = self.one_hot(tflat, c)
         pflat_softmax = prediction.view(-1, c)
+        print(tflat_one_hot.shape, pflat_softmax.shape)
 
         intersection_of_label_with_image = torch.sum(torch.mul(tflat_one_hot, pflat_softmax), dim=[1, 2])
         total_p = torch.sum(pflat_softmax, dim=[1, 2])
@@ -144,19 +145,17 @@ class Loss:
 
 # testing with random inputs
 if __name__ == "__main__":
-    '''in_channels = 1
+    in_channels = 1
     num_filters = [1, 16, 32, 64, 128, 128]
     fc_units = [3200, 1024]
     g1_out_dim = 128
     num_classes = 1
-    full_model = seg_models.SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
-    _, output = full_model(mini_batch=torch.randn(8, 1, 192, 192))'''
-    test = torch.tensor([2, 1, 2, 1, 0,1, 1, 0, 2, 2])
+    full_model = seg_models.SegUnetFullModel(in_channels, num_filters,fc_units, g1_out_dim, num_classes)
+    _, output = full_model(torch.randn(8, 1, 192, 192))
+
+    test_labels = torch.randint(low=0, high=3, size=(8, 1, 192, 192))
     loss = Loss()
-    print(loss.one_hot(test, 3))
-
-
-    '''ground_truth_masks = torch.randn(8, 1, 192, 192)
-    dice_loss = Loss(mini_batch=torch.randn(8, 1, 192, 192), loss_type=0, encoder_strategy=0, decoder_strategy=0)
-    loss = dice_loss.compute(output, ground_truth_masks)
-    print(f'computed loss: {loss}')'''
+    # test one hot vectorization
+    # print(loss.one_hot(test_labels.view(-1), 3))
+    loss_result = loss.compute(output, test_labels)
+    print(loss_result)

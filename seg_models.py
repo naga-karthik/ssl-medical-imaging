@@ -27,14 +27,14 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
     def __init__(self, in_channels=1, num_filters_list=[1, 16, 32, 64, 128, 128], fc_units_list=[3200, 1024], g1_out_dim=128):
         super(SegUnetEncoder_and_ProjectorG1, self).__init__()
         self.in_channels = in_channels
-        self.num_filters = num_filters
+        self.num_filters_list = num_filters_list
         self.context_features_list = []     # storing context features for concatenating between the encoder and decoder (like in standard UNet)
 
         self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
         self.maxpool2d = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.projector_g1 = nn.Sequential(
-            nn.Linear(num_filters[5]*(6*6), fc_units_list[0]),    # final enc6 output is 6x6 (ie downsampled to 6x6), which is then multiplied by 128 filters for flattening
+            nn.Linear(num_filters_list[5]*(6*6), fc_units_list[0]),    # final enc6 output is 6x6 (ie downsampled to 6x6), which is then multiplied by 128 filters for flattening
             nn.ReLU(inplace=True),
             nn.Linear(fc_units_list[0], fc_units_list[1]),
             nn.ReLU(inplace=True),
