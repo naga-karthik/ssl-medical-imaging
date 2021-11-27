@@ -19,7 +19,7 @@ class Loss:
     def one_hot(self, arr, num_classes):
         return torch.eye(num_classes)[arr]
 
-    def dice_loss(self, prediction, target):
+    def dice_loss(self, prediction, target, test=False):
         # should output number of unique classes
         classes = torch.unique(target)
         c = classes.shape[0]
@@ -31,7 +31,10 @@ class Loss:
         total_sum = torch.sum((pflat_softmax + tflat_one_hot), dim=1)
         dices = (2.0 * intersection_of_label_with_image + self.smooth) / (total_sum + self.smooth)
 
-        return 1.0 - torch.mean(dices)
+        if test:
+            return torch.mean(dices)
+        else:
+            return 1.0 - torch.mean(dices)
 
     def cos_sim(self, vect1, vect2):
         vect1_norm = f.normalize(vect1, dim=-1, p=2)
