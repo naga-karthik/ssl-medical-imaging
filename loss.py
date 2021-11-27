@@ -1,4 +1,5 @@
 import torch
+from torch._C import device
 import torch.nn.functional as f
 import seg_models
 
@@ -9,20 +10,25 @@ Inputs:
     decoder_strategy: 0 for random (default), 1 for Lr, 2 for Ld
 '''
 class Loss:
-    def __init__(self, loss_type=0, encoder_strategy=0, decoder_strategy=0):
+    def __init__(self, loss_type=0, encoder_strategy=0, decoder_strategy=0, device='cpu'):
         self.decoder_strategy = decoder_strategy
         self.encoder_strategy = encoder_strategy
         self.loss_type = loss_type
         self.tau = 0.1
         self.smooth = 0.001     # smoothing factor for the dice loss
+        self.device = device
 
     def one_hot(self, arr, num_classes):
+        # converting arr into a LongTensor so that it can be used as indices
+        arr = arr.long()
         return torch.eye(num_classes)[arr]
 
     def dice_loss(self, prediction, target):
         # should output number of unique classes
-        classes = torch.unique(target)
-        c = classes.shape[0]
+        # classes = torch.unique(target)      # causing issues, num_classes is wrong
+        # print(f"\nclasses shape: {classes.shape}")
+        
+        c = prediction.shape[1]  # classes.shape[0]
         tflat = target.view(-1)
         tflat_one_hot = self.one_hot(tflat, c)
         pflat_softmax = prediction.view(-1, c)
@@ -131,8 +137,9 @@ class Loss:
 
     def compute(self, prediction, target=None):
         if self.loss_type == 0:
-            # return self.dice_loss(prediction, target)
-            return self.dice_loss_v2(prediction, target)
+            prediction = prediction.to(self.device)
+            target = target.to(self.device)
+            return self.dice_loss(prediction, target)
         if self.loss_type == 1:
             return self.global_loss(prediction)
         elif self.loss_type == 2:

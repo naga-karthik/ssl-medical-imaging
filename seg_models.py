@@ -8,7 +8,7 @@ def conv_bnorm_relu(in_feats, out_feats):
     return nn.Sequential(
         nn.Conv2d(in_feats, out_feats, kernel_size=3, stride=1, padding=1, bias=False),
         nn.BatchNorm2d(out_feats),
-        nn.ReLU(inplace=True)
+        nn.ReLU()
     )
 
 def upsample_conv_bnorm_relu(in_feats, out_feats):
@@ -16,7 +16,7 @@ def upsample_conv_bnorm_relu(in_feats, out_feats):
         nn.Upsample(scale_factor=2, mode="nearest"),
         nn.Conv2d(in_feats, out_feats, kernel_size=3, stride=1, padding=1, bias=False),
         nn.BatchNorm2d(out_feats),
-        nn.ReLU(inplace=True)
+        nn.ReLU()
     )
 
 
@@ -28,16 +28,16 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
         super(SegUnetEncoder_and_ProjectorG1, self).__init__()
         self.in_channels = in_channels
         self.num_filters = num_filters_list
-        self.context_features_list = []     # storing context features for concatenating between the encoder and decoder (like in standard UNet)
+        # self.context_features_list = []     # storing context features for concatenating between the encoder and decoder (like in standard UNet)
 
         self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
         self.maxpool2d = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.projector_g1 = nn.Sequential(
             nn.Linear(num_filters_list[5]*(6*6), fc_units_list[0]),    # final enc6 output is 6x6 (ie downsampled to 6x6), which is then multiplied by 128 filters for flattening
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Linear(fc_units_list[0], fc_units_list[1]),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Linear(fc_units_list[1], g1_out_dim)
         )
 
@@ -68,13 +68,14 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
 
     def forward(self, x):
         
+        context = []    # storing context features for concatenating between the encoder and decoder (like in standard UNet)
         #  Level 1 context pathway
         out = self.conv2d_c1_1(x)
         residual_1 = out
         out = self.conv2d_c1_2(out)
         # Element Wise Summation
         out += residual_1
-        self.context_features_list.append(out)
+        context.append(out)     # self.context_features_list.append(out)
         out = self.maxpool2d(out)
 
         #  Level 2 context pathway
@@ -83,7 +84,7 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
         out = self.conv2d_c2_2(out)
         # Element Wise Summation
         out += residual_2
-        self.context_features_list.append(out)
+        context.append(out)     # self.context_features_list.append(out)
         out = self.maxpool2d(out)
 
         #  Level 3 context pathway
@@ -92,7 +93,7 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
         out = self.conv2d_c3_2(out)
         # Element Wise Summation
         out += residual_3
-        self.context_features_list.append(out)        
+        context.append(out)     # self.context_features_list.append(out)        
         out = self.maxpool2d(out)
 
         #  Level 4 context pathway
@@ -101,7 +102,7 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
         out = self.conv2d_c4_2(out)
         # Element Wise Summation
         out += residual_4
-        self.context_features_list.append(out)
+        context.append(out)     # self.context_features_list.append(out)
         out = self.maxpool2d(out)
 
         #  Level 5 context pathway
@@ -110,7 +111,7 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
         out = self.conv2d_c5_2(out)
         # Element Wise Summation
         out += residual_5
-        self.context_features_list.append(out)        
+        context.append(out)     # self.context_features_list.append(out)        
         out = self.maxpool2d(out)
 
         #  Level 6 context pathway, level 0 localization pathway
@@ -127,7 +128,7 @@ class SegUnetEncoder_and_ProjectorG1(nn.Module):
         out_projector_g1 = self.projector_g1(out_projector_g1)
 
 
-        return enc_out_c6, out_projector_g1,  self.context_features_list
+        return enc_out_c6, out_projector_g1, context # self.context_features_list
 
 
 class SegUnetDecoder(nn.Module):
