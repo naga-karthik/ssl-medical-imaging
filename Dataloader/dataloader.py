@@ -105,7 +105,12 @@ class DataloaderRandom(Dataloader):
 
     def __getitem__(self, idx):
         # print(self.data[idx][1, None, :].shape)
-        return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
+        
+        # the line below is already returning the one-hot encoding of the labels (but we don't want that)        
+        # return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
+        
+        # this line below simply returns the ground truth
+        return self.data[idx][0, None, :], self.data[idx][1, None, :]
 
     def load_data(self):
 
