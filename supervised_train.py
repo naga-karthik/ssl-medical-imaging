@@ -31,10 +31,10 @@ from loss import Loss
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 
-parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
+parser = argparse.ArgumentParser(description="Supervised Strategy")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='R-R_epch-100_bs-64_dice_w-test', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='ce loss test1', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
@@ -79,55 +79,35 @@ class SegModel(pl.LightningModule):
         self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
         self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
 
-        self.loss = Loss(loss_type=0, device=self.device)
+        self.ce_loss = nn.CrossEntropyLoss()
         
     def forward(self, x):
         return self.net(x)
+      
+    def compute_loss(self, batch):
+        img, mask = batch
+        img, mask = img.float(), mask.long()
+        logits, out = self.net(img)
+        loss = self.ce_loss(out.flatten(2), mask.flatten(1))
+        return loss
     
     def training_step(self, batch, batch_nb):
-        train_img, train_gt = batch
-        train_img = train_img.float()
-        train_gt = train_gt.long()    #train_gt.float()
-        
-        logits, out_final = self.net(train_img)  # self(train_img)
-        # dice loss
-        loss = self.loss.compute(out_final, train_gt)
-        self.log('train_dice_loss', loss)
-        # # cross-entropy loss
-        # loss = F.cross_entropy(logits, train_gt.squeeze(dim=1))
-        # self.log('train_ce_loss', loss)
-        return {'loss' : loss}
+        loss = self.compute_loss(batch)
+        self.log('train_loss', loss)
+        return loss
 
     def validation_step(self, batch, batch_nb):
-        print(len(batch))
-        val_img, val_gt = batch
-        val_img = val_img.float() #.to(self.device)
-        val_gt = val_gt.long() # val_gt.float()   #.to(self.device)
-        
-        val_logits, val_out_final = self.net(val_img)    # self(val_img)
-        # dice loss        
-        loss = self.loss.compute(val_out_final, val_gt)
+        loss = self.compute_loss(batch)
         self.log('valid_loss', loss)
-        # # cross-entropy loss
-        # loss = F.cross_entropy(val_logits, val_gt.squeeze(dim=1))
-        # self.log('valid_loss', loss)
-        return {'loss' : loss}
     
     def test_step(self, batch, batch_nb):
+        loss = self.compute_loss(batch)
+        self.log('test_loss', loss)
+
+        print(f"\CE SCORE ON THE TEST SET: {loss}")
+
         test_img, test_gt = batch
-        test_img = test_img.float()
-
-        _, y_hat = self.forward(test_img)
-
-        test_dice_loss = self.loss.compute(y_hat, test_gt.long())
-        test_dice_score = (1.0 - test_dice_loss)    # recall that we were return 1-dice_loss for PyTorch to minimize the loss
-        print(f"\nDICE SCORE ON THE TEST SET: {test_dice_score}")
-
-        # # print the shapes of all tensors first
-        # print(f"test image shape: {test_img.shape}")    # shape: [batch_size, 1, 192, 192]
-        # print(f"test gt shape: {test_gt.shape}")        # shape: [batch_size, 1, 192, 192]
-        # print(f"prediction shape: {y_hat.shape}")       # shape: [batch_size, num_classes, 192, 192]
-
+        logits, y_hat = self.net(test_img)
         if batch_nb % 20 == 0:
             # plot every 20th image
             test_img, test_gt = test_img.squeeze(dim=1).cpu().numpy(), test_gt.squeeze(dim=1).cpu().numpy()
@@ -150,8 +130,6 @@ class SegModel(pl.LightningModule):
             # wandb.log({"Original image": [wandb.Image(test_img[5], caption=f"Original Test Image")]})
             # wandb.log({"Ground Truth": [wandb.Image(test_gt[5], caption=f"Ground Truth")]})
             # wandb.log({"prediction": [wandb.Image(pred_img[5], caption=f"Prediction Class {class_num}")]})
-        
-        return {'test_dice_score' : test_dice_score}
 
     def configure_optimizers(self):
         # opt_params = { 'lr': 1e-4, 'weight_decay': 0, }
@@ -192,7 +170,7 @@ def main(cfg):
         filename="best_model"+str(timestamp),
         monitor="valid_loss",
         save_top_k=1,
-        mode="max",
+        mode="min",
         save_last=False,
         save_weights_only=True,
     )
