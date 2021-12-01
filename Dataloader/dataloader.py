@@ -17,9 +17,9 @@ transform_fct = A.Compose([
     A.Rotate(15),
     A.HorizontalFlip(p=0.5),
     # A.RandomResizedCrop(192,192, scale=(0.95, 1.05), interpolation=cv2.INTER_NEAREST),
-    A.RandomRotate90(p=0.5),
+#     A.RandomRotate90(p=0.5),
     # A.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3]),
-    A.ElasticTransform(alpha=100, sigma=10.0),
+#     A.ElasticTransform(alpha=100, sigma=10.0),
 ])
 
 seg_transform = T.Compose([
@@ -175,9 +175,9 @@ class DataloaderRandom(Dataloader):
         # segment data
         seg = self.data[idx][1]
 
-#         transformed = transform_fct(image=vol, mask=seg)
-#         vol = torch.from_numpy(transformed['image'][None, :])
-#         seg = torch.from_numpy(transformed['mask'][None, :])
+        transformed = transform_fct(image=vol, mask=seg)
+        vol = torch.from_numpy(transformed['image'][None, :])
+        seg = torch.from_numpy(transformed['mask'][None, :])
 
         return vol, seg  # one_hot_encoding(seg, self.data_info["num_class"])
 
