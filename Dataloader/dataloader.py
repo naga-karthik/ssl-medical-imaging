@@ -1,10 +1,35 @@
 import os
 import random
+
 import nibabel as nib
 import numpy as np
 from torch.utils.data import Dataset
 from os import walk
 from skimage import transform
+import torchvision.transforms as T
+import torch
+from Dataloader.utils import CustomCompose, SimpleRandomRotation, ElasticDeformation
+
+import albumentations as A
+import cv2
+
+transform_fct = A.Compose([
+    A.Rotate(15),
+    A.HorizontalFlip(p=0.5),
+    # A.RandomResizedCrop(192,192, scale=(0.95, 1.05), interpolation=cv2.INTER_NEAREST),
+    A.RandomRotate90(p=0.5),
+    # A.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3]),
+    A.ElasticTransform(alpha=100, sigma=10.0),
+])
+
+seg_transform = T.Compose([
+    T.RandomRotation(15),
+    T.RandomHorizontalFlip(p=0.5),
+    T.RandomResizedCrop((192, 192), scale=(0.95, 1.05), interpolation=T.InterpolationMode.NEAREST),
+    SimpleRandomRotation(),
+])
+
+elastic_transform = ElasticDeformation(100, 10.0)
 
 
 class Dataloader(Dataset):
@@ -93,26 +118,7 @@ class Dataloader(Dataset):
     def get_processed_seg(self, filename_seg):
         return self.get_processed_data(filename_seg, self.seg_path, True)
 
-
-class DataloaderRandom(Dataloader):
-    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
-        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
-        self.data = self.load_data()
-        print(data_info, "final shape", self.data.shape)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        # print(self.data[idx][1, None, :].shape)
-        
-        # the line below is already returning the one-hot encoding of the labels (but we don't want that)        
-        # return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
-        
-        # this line below simply returns the ground truth
-        return self.data[idx][0, None, :], self.data[idx][1, None, :]
-
-    def load_data(self):
+    def load_data_full(self):
 
         processed_volume = []
         processed_seg = []
@@ -144,6 +150,36 @@ class DataloaderRandom(Dataloader):
         processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
         # print("final volume", processed_data_complete.shape)
         return processed_data_complete
+
+
+class DataloaderRandom(Dataloader):
+    """
+    returns random slices for fine-tuning
+    """
+
+    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
+        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
+        self.data = super().load_data_full()
+        print(data_info, "final shape", self.data.shape)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # volume data
+        vol = self.data[idx][0]
+
+        if self.seg_path is None:
+            return transform_fct(image=vol)
+
+        # segment data
+        seg = self.data[idx][1]
+
+        transformed = transform_fct(image=vol, mask=seg)
+        vol = torch.from_numpy(transformed['image'][None, :])
+        seg = torch.from_numpy(transformed['mask'][None, :])
+
+        return vol, seg  # one_hot_encoding(seg, self.data_info["num_class"])
 
 
 class DataloaderCustom(Dataloader):
@@ -185,10 +221,21 @@ class DataloaderCustom(Dataloader):
 
         if self.seg_path is None:
             # print("final slices", selected_slices_complete[:, 0].shape)
-            return selected_slices_complete[:, 0]
+            original = selected_slices_complete[:, 0]
+            # print(original.shape)
+            # for xi in original:
+            #    print(xi[0].shape, transform(image=xi[0])['image'].shape)
+            aug1 = np.array([transform_fct(image=xi[0])['image'] for xi in original])[:, None, ...]
+            aug2 = np.array([transform_fct(image=xi[0])['image'] for xi in original])[:, None, ...]
+            # print(original.shape, aug1.shape, aug2.shape)
+            return torch.from_numpy(original), torch.from_numpy(aug1), torch.from_numpy(aug2)
+        # no augmentation here
+        return selected_slices_complete[:, 0], selected_slices_complete[:,
+                                               1]  # one_hot_encoding(selected_slices_complete[:, 1],
+        #  self.data_info["num_class"], True)
 
-        return selected_slices_complete[:, 0], one_hot_encoding(selected_slices_complete[:, 1],
-                                                                self.data_info["num_class"], True)
+    def apply_transform(self, image):
+        return transform(image=image)
 
     def load_data(self):
 
@@ -301,14 +348,8 @@ def crop_or_pad(slice, dim_new):
 
 
 def one_hot_encoding(seg, nb_classes, custom=False):
-    # print(seg.shape, seg.max())
-    # res = np.eye(nb_classes)[np.array(seg[0]).reshape(-1)]
-    # seg = res.reshape(list(seg[0].shape) + [nb_classes])
     if custom:
-        seg = (np.arange(nb_classes) == seg[:,0,..., None] - 1).astype(int)
+        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(1, 4).squeeze(-1)
     else:
-        seg = (np.arange(nb_classes) == seg[0,..., None] - 1).astype(int)
-    seg = np.moveaxis(seg, -1, 0)
-    # seg = np.eye(nb_classes)[seg[0]]
-    # print(seg.shape, seg.max())
+        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(0, 3).squeeze(-1)
     return seg
