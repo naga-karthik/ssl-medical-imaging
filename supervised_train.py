@@ -1,14 +1,10 @@
 # utility packages
-from functools import cmp_to_key
 import os
 import time
 import argparse
-from torch._C import device
 
 import numpy as np
-from torch.nn.modules.module import T
 import matplotlib.pyplot as plt
-from torch.utils.data.sampler import WeightedRandomSampler
 timestamp = time.time()
 
 # machine learning packages
@@ -50,14 +46,13 @@ parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
 parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
-parser.add_argument('-bs', '--batch_size', default=64, type=int, help='Batch size')
+parser.add_argument('-bs', '--batch_size', default=256, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
-parser.add_argument('-lr', '--learning_rate', default=1e-3, type=float, help="Learning rate to use")
-parser.add_argument('-wd', '--weight_decay', default=0.0, type=float, help='Default weight decay')
+parser.add_argument('-lr', '--learning_rate', default=5e-4, type=float, help="Learning rate to use")
+parser.add_argument('-wd', '--weight_decay', default=1e-3, type=float, help='Default weight decay')
 
 cfg = parser.parse_args()
-
 
 class SegModel(pl.LightningModule):
     def __init__(self, cfg):
@@ -75,69 +70,54 @@ class SegModel(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DataloaderRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
-        self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
-        self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.train_dataset = DataloaderRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path,
+                                              preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path,
+                                              preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path,
+                                             preprocessed_data=True, seg_path=self.cfg.seg_path)
 
         self.ce_loss = nn.CrossEntropyLoss()
-        
+
     def forward(self, x):
-        return self.net(x)
+        return self.net(x)[1] # returns the softmax
       
     def compute_loss(self, batch):
-        img, mask = batch
-        img, mask = img.float(), mask.long()
-        logits, out = self.net(img)
-        loss = self.ce_loss(out.flatten(2), mask.flatten(1))
-        return loss
+        imgs, gts = batch
+        imgs, gts = imgs.float(), gts.long()
+        logits, preds = self.net(imgs)
+        # print(torch.unique(gts), gts.shape)
+
+        loss = self.ce_loss(logits, gts.squeeze(1))
+        return loss, preds, imgs, gts
     
     def training_step(self, batch, batch_nb):
-        loss = self.compute_loss(batch)
-        self.log('train_loss', loss)
+        loss, preds, imgs, gts = self.compute_loss(batch)
+        self.log('train_loss', loss, on_step=False, on_epoch=True)
+
+        if batch_nb == 0: # once per epoch
+            fig = visualize(preds, imgs, gts)
+            wandb.log({"Training Output Visualizations": fig})
         return loss
 
     def validation_step(self, batch, batch_nb):
-        loss = self.compute_loss(batch)
-        self.log('valid_loss', loss)
+        loss, preds, imgs, gts = self.compute_loss(batch)
+        self.log('valid_loss', loss, on_step=False, on_epoch=True)
+
+        if batch_nb == 0: # once per epoch
+            fig = visualize(preds, imgs, gts)
+            wandb.log({"Validation Output Visualizations": fig})
     
     def test_step(self, batch, batch_nb):
-        loss = self.compute_loss(batch)
-        self.log('test_loss', loss)
+        loss, preds, imgs, gts = self.compute_loss(batch)
+        self.log('test_loss', loss, on_step=False, on_epoch=True)
 
-        print(f"\CE SCORE ON THE TEST SET: {loss}")
-
-        test_img, test_gt = batch
-        logits, y_hat = self.net(test_img)
-        if batch_nb % 20 == 0:
-            # plot every 20th image
-            test_img, test_gt = test_img.squeeze(dim=1).cpu().numpy(), test_gt.squeeze(dim=1).cpu().numpy()
-            y_hat_npy = y_hat.cpu().numpy()
-            class_num = 1
-            pred_img = y_hat_npy[:, class_num, :, :]
-
-            # plot images on wandb
-            fig, axs = plt.subplots(5, 4, figsize=(10, 10))
-            fig.suptitle('Original --> Ground Truth --> Prediction --> Pred with Mask layover')
-            for i in range(5):
-                img_num = np.random.randint(0, self.cfg.batch_size)
-                axs[i, 0].imshow(test_img[img_num], cmap='gray'); axs[i, 0].axis('off')
-                axs[i, 1].imshow(test_gt[img_num], cmap='gray'); axs[i, 1].axis('off')    
-                axs[i, 2].imshow(pred_img[img_num], cmap='gray'); axs[i, 2].axis('off')
-                axs[i, 3].imshow((test_img[img_num] - pred_img[img_num]), cmap='gray'); axs[i, 3].axis('off')
-            fig.show()
-            wandb.log({"Output Visualizations": fig})
-
-            # wandb.log({"Original image": [wandb.Image(test_img[5], caption=f"Original Test Image")]})
-            # wandb.log({"Ground Truth": [wandb.Image(test_gt[5], caption=f"Ground Truth")]})
-            # wandb.log({"prediction": [wandb.Image(pred_img[5], caption=f"Prediction Class {class_num}")]})
+        # qualitative results on wandb
+        fig = visualize(preds, imgs, gts)
+        wandb.log({"Test Output Visualizations": fig})
 
     def configure_optimizers(self):
-        # opt_params = { 'lr': 1e-4, 'weight_decay': 0, }
-        # scheduler_params={ 'T_0': 40, 'eta_min': 1e-5 }
-        # optimizer = eval(self.cfg.opt)(self.parameters(), **self.cfg.opt_params)
-        # scheduler = eval(self.cfg.scheduler)(optimizer, **self.cfg.scheduler_params)
-
-        optimizer = optim.Adam(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
+        optimizer = optim.AdamW(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, eta_min=1e-5)
         
         return [optimizer], [scheduler]
@@ -153,6 +133,41 @@ class SegModel(pl.LightningModule):
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
                              shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
+        
+def visualize(preds, imgs, gts, num_imgs=10):
+    main_colors = torch.tensor([
+                              [0, 0, 0],
+                              [1, 0, 0],
+                              [0, 1, 0],
+                              [0, 0, 1],
+                              [1, 1, 0],
+                              [0, 1, 1],
+                              [1, 0, 1],
+                              [1, 1, 1]
+                                ]).view(8, 3).float()
+    # getting ready for post processing
+    imgs, gts, preds = imgs.detach().cpu(), gts.detach().cpu(), preds.detach().cpu()
+    imgs = imgs.squeeze(dim=1).numpy()
+    gts = gts.squeeze(dim=1)
+
+    num_classes = preds.shape[1]
+    colors = main_colors[:num_classes]
+    # coloring the predictions
+    preds[preds < torch.max(preds, dim=1, keepdims=True)[0]] = 0
+    preds_colored = torch.tensordot(preds, colors, dims=[[1], [0]]).numpy()
+    # coloring the ground truth masks
+    gts_onehot = F.one_hot(gts, num_classes=num_classes).permute(0, 3, 1, 2)
+    gts_colored = torch.tensordot(gts_onehot.float(), colors, dims=[[1], [0]]).numpy()
+
+    fig, axs = plt.subplots(3, num_imgs, figsize=(9, 3))
+    fig.suptitle('Original --> Ground Truth --> Prediction')
+    for i in range(num_imgs):
+        img_num = np.random.randint(0, len(imgs))
+        axs[0, i].imshow(imgs[img_num], cmap='gray'); axs[0, i].axis('off') 
+        axs[1, i].imshow(gts_colored[img_num]); axs[1, i].axis('off')    
+        axs[2, i].imshow(preds_colored[img_num]); axs[2, i].axis('off')
+    fig.show()
+    return fig
 
 def main(cfg):
     # experiment tracker (you need to sign in with your account)
@@ -160,7 +175,7 @@ def main(cfg):
                             name='%s <- %d'%(cfg.exp_name, timestamp), 
                             group= '%s'%(cfg.exp_name), 
                             log_model=True, # save best model using checkpoint callback
-                            project='supervised-train',
+                            project='supervised-train-arash',
                             entity='ssl-medical-imaging',
                             config=cfg,
     )
@@ -177,7 +192,8 @@ def main(cfg):
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')
 
     trainer = pl.Trainer(
-        devices=cfg.num_gpus, accelerator="gpu", strategy="ddp",
+        devices=cfg.num_gpus, 
+        accelerator="gpu", strategy="ddp",
         logger=wandb_logger,
         callbacks=[checkpoint, lr_monitor],
         max_epochs=cfg.epochs,
@@ -185,8 +201,6 @@ def main(cfg):
     )
 
     model = SegModel(cfg)
-    # log gradients, parameter histogram and model topology
-    wandb_logger.watch(model, log='all')
     
     trainer.fit(model)
     print("------- Training Done! -------")
