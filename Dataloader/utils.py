@@ -4,6 +4,7 @@ import random
 
 state1 = None
 
+
 class SimpleRandomRotation:
     """Rotate by one of the given angles."""
 
@@ -17,12 +18,13 @@ class SimpleRandomRotation:
         transform = T.RandomRotation((angle, angle))
         return transform(x)
 
+
 class ElasticDeformation:
     """Rotate by one of the given angles."""
 
     def __init__(self, control_point_spacing, sigma):
-        self.spacing = (control_point_spacing,) * 2 # 100
-        self.sigmas = [sigma] * 2 # 10.0
+        self.spacing = (control_point_spacing,) * 2  # 100
+        self.sigmas = [sigma] * 2  # 10.0
         self.interpolation = "nearest"
         self.fill = None
 
@@ -50,7 +52,8 @@ class ElasticDeformation:
             if self.sigmas[d] > 0:
                 control_point_offsets[d] = torch.randn(size=control_points) * self.sigmas[d] * 1 / (0.5 * shape[d])
         displacement = T.functional_tensor.resize(control_point_offsets, shape,
-                                                  interpolation="bicubic").unsqueeze(-1).transpose(0, -1)  # 1 x H x W x 2
+                                                  interpolation="bicubic").unsqueeze(-1).transpose(0,
+                                                                                                   -1)  # 1 x H x W x 2
 
         hw_space = [torch.linspace((-s + 1) / s, (s - 1) / s, s) for s in shape]
         grid_y, grid_x = torch.meshgrid(hw_space, indexing='ij')
@@ -91,4 +94,3 @@ class CustomCompose:
             format_string += '    {0}'.format(t)
         format_string += '\n)'
         return format_string
-

@@ -10,12 +10,16 @@ import torchvision.transforms as T
 import torch
 from Dataloader.utils import CustomCompose, SimpleRandomRotation, ElasticDeformation
 
-vol_transform = T.Compose([
-    T.RandomRotation(15),
-    T.RandomHorizontalFlip(p=0.5),
-    T.RandomResizedCrop((192, 192), scale=(0.95, 1.05), interpolation=T.InterpolationMode.NEAREST),
-    SimpleRandomRotation(),
-    T.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3]),
+import albumentations as A
+import cv2
+
+transform_fct = A.Compose([
+    A.Rotate(15),
+    A.HorizontalFlip(p=0.5),
+    # A.RandomResizedCrop(192,192, scale=(0.95, 1.05), interpolation=cv2.INTER_NEAREST),
+    A.RandomRotate90(p=0.5),
+    # A.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3]),
+    A.ElasticTransform(alpha=100, sigma=10.0),
 ])
 
 seg_transform = T.Compose([
@@ -114,57 +118,7 @@ class Dataloader(Dataset):
     def get_processed_seg(self, filename_seg):
         return self.get_processed_data(filename_seg, self.seg_path, True)
 
-
-class DataloaderRandom(Dataloader):
-    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
-        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
-        self.data = self.load_data()
-        print(data_info, "final shape", self.data.shape)
-
-    def __len__(self):
-        return len(self.ids)
-
-    def __getitem__(self, idx):
-        # volume data
-        vol = torch.from_numpy(self.data[idx][0, None, :])
-
-        if self.seg_path is None:
-            return elastic_transform(vol_transform(vol))
-        # segment data
-        seg = torch.from_numpy(self.data[idx][1, None, :])
-
-        # make a seed with numpy generator
-        seed = np.random.randint(2147483647)
-
-        # fix python and torch random seed (python for custom rotations and torch for torchvision augmentations
-        # torch.cuda.manual_seed(seed)
-        # torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-        # torch.backends.cudnn.benchmark = False
-        # torch.backends.cudnn.deterministic = True
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        vol = vol_transform(vol)
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        vol = elastic_transform(vol)
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        seg = seg_transform(seg)
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        seg = elastic_transform(seg)
-
-        return vol, one_hot_encoding(seg, self.data_info["num_class"])
-
-    def load_data(self):
+    def load_data_full(self):
 
         processed_volume = []
         processed_seg = []
@@ -198,6 +152,36 @@ class DataloaderRandom(Dataloader):
         return processed_data_complete
 
 
+class DataloaderRandom(Dataloader):
+    """
+    returns random slices for fine-tuning
+    """
+
+    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
+        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
+        self.data = super().load_data_full()
+        print(data_info, "final shape", self.data.shape)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # volume data
+        vol = self.data[idx][0]
+
+        if self.seg_path is None:
+            return transform_fct(image=vol)
+
+        # segment data
+        seg = self.data[idx][1]
+
+        transformed = transform_fct(image=vol, mask=seg)
+        vol = torch.from_numpy(transformed['image'][None, :])
+        seg = torch.from_numpy(transformed['mask'][None, :])
+
+        return vol, seg  # one_hot_encoding(seg, self.data_info["num_class"])
+
+
 class DataloaderCustom(Dataloader):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
@@ -208,7 +192,7 @@ class DataloaderCustom(Dataloader):
         print(data_info, "final shape", self.data.shape)
 
     def __len__(self):
-        return len(self.data)
+        return len(self.ids)
 
     def __getitem__(self, idx):
         slices = self.data[idx]
@@ -237,13 +221,21 @@ class DataloaderCustom(Dataloader):
 
         if self.seg_path is None:
             # print("final slices", selected_slices_complete[:, 0].shape)
-            original = torch.from_numpy(selected_slices_complete[:, 0])
-            aug1 = elastic_transform(vol_transform(original))
-            aug2 = elastic_transform(vol_transform(original))
-            return original, aug1, aug2
+            original = selected_slices_complete[:, 0]
+            # print(original.shape)
+            # for xi in original:
+            #    print(xi[0].shape, transform(image=xi[0])['image'].shape)
+            aug1 = np.array([transform_fct(image=xi[0])['image'] for xi in original])[:, None, ...]
+            aug2 = np.array([transform_fct(image=xi[0])['image'] for xi in original])[:, None, ...]
+            # print(original.shape, aug1.shape, aug2.shape)
+            return torch.from_numpy(original), torch.from_numpy(aug1), torch.from_numpy(aug2)
         # no augmentation here
-        return selected_slices_complete[:, 0], one_hot_encoding(selected_slices_complete[:, 1],
-                                                                self.data_info["num_class"], True)
+        return selected_slices_complete[:, 0], selected_slices_complete[:,
+                                               1]  # one_hot_encoding(selected_slices_complete[:, 1],
+        #  self.data_info["num_class"], True)
+
+    def apply_transform(self, image):
+        return transform(image=image)
 
     def load_data(self):
 

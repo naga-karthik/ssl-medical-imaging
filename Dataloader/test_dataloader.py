@@ -2,6 +2,7 @@ from Dataloader.dataloader import DataloaderCustom, DataloaderRandom
 from Dataloader.init_data import md_prostate, acdc
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 import Dataloader.experiments_paper.data_init_acdc, Dataloader.experiments_paper.data_init_prostate_md
 
 
@@ -66,13 +67,13 @@ def test_dataloader_random():
     test_dataset = DataloaderRandom(md_prostate, test_ids, img_path, preprocessed_data=True, seg_path=seg_path)
 
     for test_images, test_labels in train_dataset:
-        print(test_images.shape, test_labels.shape)
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
     for test_images, test_labels in val_dataset:
-        print(test_images.shape, test_labels.shape)
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
     for test_images, test_labels in test_dataset:
-        print(test_images.shape, test_labels.shape)
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
     # ACDC
     img_path = "../ACDC"
@@ -80,18 +81,18 @@ def test_dataloader_random():
     train_ids = Dataloader.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
     val_ids = Dataloader.experiments_paper.data_init_acdc.val_data(no_of_tr_imgs, comb_of_tr_imgs)
     test_ids = Dataloader.experiments_paper.data_init_acdc.test_data()
-    train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=True, seg_path=seg_path)
-    val_dataset = DataloaderRandom(acdc, val_ids, img_path, preprocessed_data=True, seg_path=seg_path)
-    test_dataset = DataloaderRandom(acdc, test_ids, img_path, preprocessed_data=True, seg_path=seg_path)
+    train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=False, seg_path=seg_path)
+    val_dataset = DataloaderRandom(acdc, val_ids, img_path, preprocessed_data=False, seg_path=seg_path)
+    test_dataset = DataloaderRandom(acdc, test_ids, img_path, preprocessed_data=False, seg_path=seg_path)
 
     for test_images, test_labels in train_dataset:
-        print(test_images.shape, test_labels.shape)
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
     for test_images, test_labels in val_dataset:
-        print(test_images.shape, test_labels.shape)
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
     for test_images, test_labels in test_dataset:
-        print(test_images.shape, test_labels.shape)
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
 def preprocess_all_data():
     # preprocess all data
@@ -129,4 +130,8 @@ for test_images, test_labels in test_loader:
 print(max)
 """
 
-test_custom_vol_only()
+# test_custom_vol_only()
+
+# test_augmentions()
+test_dataloader_random()
+# test_augmentions()
