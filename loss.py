@@ -1,7 +1,38 @@
 import torch
 from torch._C import device
-import torch.nn.functional as f
+import torch.nn.functional as F
+from torch import Tensor
 import seg_models
+
+# Taken from: https://github.com/milesial/Pytorch-UNet/blob/master/utils/dice_score.py
+def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon=1e-6):
+    # Average of Dice coefficient for all batches, or for a single mask
+    assert input.size() == target.size()
+    if input.dim() == 2 and reduce_batch_first:
+        raise ValueError(f'Dice: asked to reduce batch but got tensor without batch dimension (shape {input.shape})')
+
+    if input.dim() == 2 or reduce_batch_first:
+        inter = torch.dot(input.reshape(-1), target.reshape(-1))
+        sets_sum = torch.sum(input) + torch.sum(target)
+        if sets_sum.item() == 0:
+            sets_sum = 2 * inter
+        return (2 * inter + epsilon) / (sets_sum + epsilon)
+    else:
+        # compute and average metric for each batch element
+        dice = 0
+        for i in range(input.shape[0]):
+            dice += dice_coeff(input[i, ...], target[i, ...])
+        return dice / input.shape[0]
+
+
+def multiclass_dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon=1e-6):
+    # Average of Dice coefficient for all classes
+    assert input.size() == target.size()
+    dice = 0
+    for channel in range(input.shape[1]):
+        dice += dice_coeff(input[:, channel, ...], target[:, channel, ...], reduce_batch_first, epsilon)
+
+    return dice / input.shape[1]
 
 '''
 Inputs:
@@ -20,8 +51,15 @@ class Loss:
 
     def one_hot(self, arr, num_classes):
         # converting arr into a LongTensor so that it can be used as indices
-        arr = arr.long()
-        return torch.eye(num_classes)[arr]
+        arr = arr.squeeze()
+        one_hot_encoded = torch.eye(num_classes)[arr]   # shape: [batch_size, 192, 192, num_classes]
+        return one_hot_encoded.permute(0, 3, 1, 2)      # shape: [batch_size, num_classes, 192, 192]
+
+    def dice_loss_v2(self, input: Tensor, target: Tensor, multiclass: bool = False):
+        # Dice loss (objective to minimize) between 0 and 1
+        assert input.size() == target.size()
+        fn = multiclass_dice_coeff if multiclass else dice_coeff
+        return 1 - fn(input, target, reduce_batch_first=True)
 
     def dice_loss(self, prediction, target):
         # should output number of unique classes
@@ -40,8 +78,8 @@ class Loss:
         return 1.0 - torch.mean(dices)
 
     def cos_sim(self, vect1, vect2):
-        vect1_norm = f.normalize(vect1, dim=-1, p=2)
-        vect2_norm = torch.transpose(f.normalize(vect2, dim=-1, p=2), -1, -2)
+        vect1_norm = F.normalize(vect1, dim=-1, p=2)
+        vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), -1, -2)
         return torch.matmul(vect1_norm, vect2_norm)
 
     def create_pos_set(self, latent_mini_batch):
@@ -135,34 +173,40 @@ class Loss:
         # TODO: local loss implementation (L_l)
         pass
 
-    def compute(self, prediction, target=None):
+    def compute(self, prediction, target=None, multiclass=False):
         if self.loss_type == 0:
             prediction = prediction.to(self.device)
             target = target.to(self.device)
-            return self.dice_loss(prediction, target)
+            return self.dice_loss_v2(prediction, target, multiclass)    # the new, "working" dice loss
+            # return self.dice_loss(prediction, target, multiclass)     # original, incorrect one
         if self.loss_type == 1:
             return self.global_loss(prediction)
         elif self.loss_type == 2:
             return self.local_loss(prediction)
 
+
 # testing with random inputs
 if __name__ == "__main__":
-    in_channels = 1
-    num_filters = [1, 16, 32, 64, 128, 128]
-    fc_units = [3200, 1024]
-    g1_out_dim = 128
-    num_classes = 3
-
-    full_model = seg_models.SegUnetFullModel(in_channels, num_filters,fc_units, g1_out_dim, num_classes)
-    logits, output = full_model(torch.randn(8, 1, 192, 192))
-    print(logits.shape)
-    print(f"output shape: {output.shape}")
-
-    test_labels = torch.randint(low=0, high=3, size=(8, 1, 192, 192))
+    num_classes = 4
     loss = Loss()
-    # test one hot vectorization
-    # print(loss.one_hot(test_labels.view(-1), 3))
-    
-    loss_result = loss.compute(output, test_labels)
-    # loss_result = loss.compute(logits, test_labels)        # for dice_loss_v2
-    print(loss_result)
+    pred = torch.randn(8, num_classes, 192, 192)
+    pred_softmax = F.softmax(pred, dim=1)
+
+    target = torch.randint(low=0, high=4, size=(8, 1, 192, 192))
+    print(f"unique output: {torch.unique(target)}")
+    target_one_hot = loss.one_hot(target.long(), num_classes=num_classes)
+    print(target_one_hot.shape)
+
+    dice_loss = loss.compute(pred_softmax, target_one_hot, multiclass=True)
+    print(f"dice loss: {dice_loss}")
+
+    # in_channels = 1
+    # num_filters = [1, 16, 32, 64, 128, 128]
+    # fc_units = [3200, 1024]
+    # g1_out_dim = 128
+    # num_classes = 3
+
+    # full_model = seg_models.SegUnetFullModel(in_channels, num_filters,fc_units, g1_out_dim, num_classes)
+    # logits, output = full_model(torch.randn(8, 1, 192, 192))
+    # print(logits.shape)
+    # print(f"output shape: {output.shape}")
