@@ -174,12 +174,12 @@ class DataloaderRandom(Dataloader):
 
         # segment data
         seg = self.data[idx][1]
+        seg = np.round(2 * seg)
 
         transformed = transform_fct(image=vol, mask=seg)
         vol = torch.from_numpy(transformed['image'][None, :])
         seg = torch.from_numpy(transformed['mask'][None, :])
         
-        print(np.unique(seg))
 
         return vol, seg  # one_hot_encoding(seg, self.data_info["num_class"])
 
