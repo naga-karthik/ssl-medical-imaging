@@ -27,7 +27,7 @@ from seg_models_v2 import UNet
 from Dataloader.init_data import acdc, md_prostate
 from Dataloader.dataloader import DataloaderRandom
 from Dataloader.experiments_paper import data_init_acdc, data_init_prostate_md
-from loss import Loss
+from loss import Loss, multiclass_dice_coeff
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
@@ -52,7 +52,7 @@ parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Outp
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
-parser.add_argument('-ep', '--epochs', default=5, type=int, help='Number of epochs to train')
+parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
 parser.add_argument('-bs', '--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
@@ -94,39 +94,60 @@ class SegModel(pl.LightningModule):
         train_gt = train_gt.long()    #train_gt.float()
         
         logits, out_final = self.net(train_img)  # self(train_img)
-        # # dice loss
+        # # dice loss (ours) --> need to debug again to see what's wrong
         # loss = self.loss.compute(out_final, train_gt)
         # self.log('train_dice_loss', loss)
-        # cross-entropy loss
-        loss = F.cross_entropy(logits, train_gt.squeeze(dim=1))
-        self.log('train_ce_loss', loss)
+        
+        # dice loss (found online)
+        train_gt_one_hot = self.loss.one_hot(train_gt, num_classes=self.cfg.num_classes)
+        loss = self.loss.compute(out_final, train_gt_one_hot, multiclass=True)
+        self.log('train_dice_loss', loss)
+        
+        # # cross-entropy loss
+        # loss = F.cross_entropy(logits, train_gt.squeeze(dim=1))
+        # self.log('train_ce_loss', loss)
         return {'loss' : loss}
 
     def validation_step(self, batch, batch_nb):
         print(len(batch))
         val_img, val_gt = batch
         val_img = val_img.float() #.to(self.device)
-        # print(f"val_img min: {val_img.min()} \t val_img max: {val_img.max()}")
         val_gt = val_gt.long() # val_gt.float()   #.to(self.device)
         
-        val_logits, val_out_final = self.net(val_img)    # self(val_img)
+        val_logits, val_out_final = self.net(val_img) 
         # # dice loss        
         # loss = self.loss.compute(val_out_final, val_gt)
         # self.log('valid_loss', loss)
-        # cross-entropy loss
-        loss = F.cross_entropy(val_logits, val_gt.squeeze(dim=1))
+        
+        # dice loss (found online)
+        val_gt_one_hot = self.loss.one_hot(val_gt, num_classes=self.cfg.num_classes)
+        loss = self.loss.compute(val_out_final, val_gt_one_hot, multiclass=True)
         self.log('valid_loss', loss)
+
+        # # cross-entropy loss
+        # loss = F.cross_entropy(val_logits, val_gt.squeeze(dim=1))
+        # self.log('valid_loss', loss)
         return {'loss' : loss}
     
     def test_step(self, batch, batch_nb):
         test_img, test_gt = batch
-        print(f"unique output: {torch.unique(test_gt)} \t gt shape: {test_gt.shape}")
         test_img = test_img.float()
 
         _, y_hat = self.forward(test_img)
 
-        test_dice_loss = self.loss.compute(y_hat, test_gt.long())
-        test_dice_score = (1.0 - test_dice_loss)    # recall that we were return 1-dice_loss for PyTorch to minimize the loss
+        # # dice score (ours)
+        # test_dice_loss = self.loss.compute(y_hat, test_gt.long())
+        # test_dice_score = (1.0 - test_dice_loss)    # recall that we were return 1-dice_loss for PyTorch to minimize the loss
+        # print(f"\nDICE SCORE ON THE TEST SET: {test_dice_score}")
+
+        # dice score (found online)
+        test_gt_one_hot = self.loss.one_hot(test_gt.long(), num_classes=self.cfg.num_classes)
+        # computing the dice score, ignoring the background
+        test_dice_score = multiclass_dice_coeff(
+            (y_hat[:, 1:, :, :]).to(self.device), 
+            (test_gt_one_hot[:, 1:, :, :]).to(self.device), 
+            reduce_batch_first=False
+        )
         print(f"\nDICE SCORE ON THE TEST SET: {test_dice_score}")
 
         # # print the shapes of all tensors first
@@ -138,12 +159,10 @@ class SegModel(pl.LightningModule):
             # plot every 20th image
             test_img, test_gt = test_img.squeeze(dim=1).cpu().numpy(), test_gt.squeeze(dim=1).cpu().numpy()
             y_hat_npy = y_hat.cpu().numpy()
-            # class_num = 1
-            # pred_img = y_hat_npy[:, class_num, :, :]    # taking only 1 class, whereas test_gt plots all classes
 
             # plot images on wandb
             fig, axs = plt.subplots(5, 6, figsize=(10, 10))
-            fig.suptitle('Original --> Ground Truth --> Prediction (class 1) --> Prediction (class 2) --> Prediction (class 3) --> Pred Class 1 w/ Mask layover')
+            fig.suptitle('Original --> Ground Truth --> Pred. (class 1) --> Pred. (class 2) --> Pred. (class 3) --> Pred Class 1 w/ Mask layover')
             for i in range(5):
                 img_num = np.random.randint(0, self.cfg.batch_size)
                 axs[i, 0].imshow(test_img[img_num], cmap='gray'); axs[i, 0].axis('off') 
@@ -156,10 +175,6 @@ class SegModel(pl.LightningModule):
                 axs[i, 5].imshow((test_img[img_num] - y_hat_npy[img_num, 1, :, :]), cmap='gray'); axs[i, 5].axis('off')
             fig.show()
             wandb.log({"Output Visualizations": fig})
-
-            # wandb.log({"Original image": [wandb.Image(test_img[5], caption=f"Original Test Image")]})
-            # wandb.log({"Ground Truth": [wandb.Image(test_gt[5], caption=f"Ground Truth")]})
-            # wandb.log({"prediction": [wandb.Image(pred_img[5], caption=f"Prediction Class {class_num}")]})
         
         return {'test_dice_score' : test_dice_score}
 
