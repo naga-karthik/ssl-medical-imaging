@@ -23,10 +23,11 @@ import torchvision.transforms as transforms
 
 # dataloaders and segmentation models
 from seg_models import SegUnetFullModel, SegUnetEncoder_and_ProjectorG1, SegUnetDecoder
+from seg_models_v2 import UNet
 from Dataloader.init_data import acdc, md_prostate
 from Dataloader.dataloader import DataloaderRandom
 from Dataloader.experiments_paper import data_init_acdc, data_init_prostate_md
-from loss import Loss
+from loss import Loss, multiclass_dice_coeff
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
@@ -34,7 +35,7 @@ seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='R-R_epch-100_bs-64_dice_w-test', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='R-R_Test-NewUNet', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
@@ -43,7 +44,9 @@ parser.add_argument('--img_path', default=img_path, type=str, help='Absolute pat
 parser.add_argument('--seg_path', default=seg_path, type=str, help='Same as path of training data')
 # model
 parser.add_argument('-in_ch', '--in_channels', default=1, type=int, help='Number of input channels')
-parser.add_argument('-num_flt', '--num_filters_list', nargs='+', default=[1, 16, 32, 64, 128, 256], help='List containing no. of filters for Conv Layers')
+# parser.add_argument('-num_flt', '--num_filters_list', nargs='+', default=[16, 32, 64, 128, 256, 512], help='List containing no. of filters for Conv Layers')
+# parser.add_argument('-num_flt', '--num_filters_list', nargs='+', default=[1, 16, 32, 64, 128, 128], help='List containing no. of filters for Conv Layers')
+parser.add_argument('-num_flt', '--init_num_filters', type=int, default=32, help='Initial no. of filters for Conv Layers')
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024], help='List containing no. of units in FC layers')
 parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Output dimension for the projector head')
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
@@ -58,18 +61,18 @@ parser.add_argument('-wd', '--weight_decay', default=0.0, type=float, help='Defa
 
 cfg = parser.parse_args()
 
-
 class SegModel(pl.LightningModule):
     def __init__(self, cfg):
         super(SegModel, self).__init__()
         self.cfg = cfg
-        self.net = SegUnetFullModel(
-            in_channels=self.cfg.in_channels, 
-            num_filters_list=self.cfg.num_filters_list,
-            fc_units=self.cfg.fc_units_list,
-            g1_out_dim=self.cfg.g1_out_dim, 
-            num_classes=self.cfg.num_classes
-        )
+        # self.net = SegUnetFullModel(
+        #     in_channels=self.cfg.in_channels, 
+        #     num_filters_list=self.cfg.num_filters_list,
+        #     fc_units=self.cfg.fc_units_list,
+        #     g1_out_dim=self.cfg.g1_out_dim, 
+        #     num_classes=self.cfg.num_classes
+        # )
+        self.net = UNet(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
 
         self.train_ids_acdc = data_init_acdc.train_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
@@ -87,12 +90,19 @@ class SegModel(pl.LightningModule):
     def training_step(self, batch, batch_nb):
         train_img, train_gt = batch
         train_img = train_img.float()
+        # print(f"train_img min: {train_img.min()} \t train_img max: {train_img.max()}")
         train_gt = train_gt.long()    #train_gt.float()
         
         logits, out_final = self.net(train_img)  # self(train_img)
-        # dice loss
-        loss = self.loss.compute(out_final, train_gt)
+        # # dice loss (ours) --> need to debug again to see what's wrong
+        # loss = self.loss.compute(out_final, train_gt)
+        # self.log('train_dice_loss', loss)
+        
+        # dice loss (found online)
+        train_gt_one_hot = self.loss.one_hot(train_gt, num_classes=self.cfg.num_classes)
+        loss = self.loss.compute(out_final, train_gt_one_hot, multiclass=True)
         self.log('train_dice_loss', loss)
+        
         # # cross-entropy loss
         # loss = F.cross_entropy(logits, train_gt.squeeze(dim=1))
         # self.log('train_ce_loss', loss)
@@ -104,10 +114,16 @@ class SegModel(pl.LightningModule):
         val_img = val_img.float() #.to(self.device)
         val_gt = val_gt.long() # val_gt.float()   #.to(self.device)
         
-        val_logits, val_out_final = self.net(val_img)    # self(val_img)
-        # dice loss        
-        loss = self.loss.compute(val_out_final, val_gt)
+        val_logits, val_out_final = self.net(val_img) 
+        # # dice loss        
+        # loss = self.loss.compute(val_out_final, val_gt)
+        # self.log('valid_loss', loss)
+        
+        # dice loss (found online)
+        val_gt_one_hot = self.loss.one_hot(val_gt, num_classes=self.cfg.num_classes)
+        loss = self.loss.compute(val_out_final, val_gt_one_hot, multiclass=True)
         self.log('valid_loss', loss)
+
         # # cross-entropy loss
         # loss = F.cross_entropy(val_logits, val_gt.squeeze(dim=1))
         # self.log('valid_loss', loss)
@@ -119,8 +135,19 @@ class SegModel(pl.LightningModule):
 
         _, y_hat = self.forward(test_img)
 
-        test_dice_loss = self.loss.compute(y_hat, test_gt.long())
-        test_dice_score = (1.0 - test_dice_loss)    # recall that we were return 1-dice_loss for PyTorch to minimize the loss
+        # # dice score (ours)
+        # test_dice_loss = self.loss.compute(y_hat, test_gt.long())
+        # test_dice_score = (1.0 - test_dice_loss)    # recall that we were return 1-dice_loss for PyTorch to minimize the loss
+        # print(f"\nDICE SCORE ON THE TEST SET: {test_dice_score}")
+
+        # dice score (found online)
+        test_gt_one_hot = self.loss.one_hot(test_gt.long(), num_classes=self.cfg.num_classes)
+        # computing the dice score, ignoring the background
+        test_dice_score = multiclass_dice_coeff(
+            (y_hat[:, 1:, :, :]).to(self.device), 
+            (test_gt_one_hot[:, 1:, :, :]).to(self.device), 
+            reduce_batch_first=False
+        )
         print(f"\nDICE SCORE ON THE TEST SET: {test_dice_score}")
 
         # # print the shapes of all tensors first
@@ -132,24 +159,22 @@ class SegModel(pl.LightningModule):
             # plot every 20th image
             test_img, test_gt = test_img.squeeze(dim=1).cpu().numpy(), test_gt.squeeze(dim=1).cpu().numpy()
             y_hat_npy = y_hat.cpu().numpy()
-            class_num = 1
-            pred_img = y_hat_npy[:, class_num, :, :]
 
             # plot images on wandb
-            fig, axs = plt.subplots(5, 4, figsize=(10, 10))
-            fig.suptitle('Original --> Ground Truth --> Prediction --> Pred with Mask layover')
+            fig, axs = plt.subplots(5, 6, figsize=(10, 10))
+            fig.suptitle('Original --> Ground Truth --> Pred. (class 1) --> Pred. (class 2) --> Pred. (class 3) --> Pred Class 1 w/ Mask layover')
             for i in range(5):
                 img_num = np.random.randint(0, self.cfg.batch_size)
-                axs[i, 0].imshow(test_img[img_num], cmap='gray'); axs[i, 0].axis('off')
+                axs[i, 0].imshow(test_img[img_num], cmap='gray'); axs[i, 0].axis('off') 
                 axs[i, 1].imshow(test_gt[img_num], cmap='gray'); axs[i, 1].axis('off')    
-                axs[i, 2].imshow(pred_img[img_num], cmap='gray'); axs[i, 2].axis('off')
-                axs[i, 3].imshow((test_img[img_num] - pred_img[img_num]), cmap='gray'); axs[i, 3].axis('off')
+
+                axs[i, 2].imshow(y_hat_npy[img_num, 1, :, :], cmap='gray'); axs[i, 2].axis('off')   # class 1
+                axs[i, 3].imshow(y_hat_npy[img_num, 2, :, :], cmap='gray'); axs[i, 3].axis('off')   # class 2
+                axs[i, 4].imshow(y_hat_npy[img_num, 3, :, :], cmap='gray'); axs[i, 4].axis('off')   # class 3                             
+
+                axs[i, 5].imshow((test_img[img_num] - y_hat_npy[img_num, 1, :, :]), cmap='gray'); axs[i, 5].axis('off')
             fig.show()
             wandb.log({"Output Visualizations": fig})
-
-            # wandb.log({"Original image": [wandb.Image(test_img[5], caption=f"Original Test Image")]})
-            # wandb.log({"Ground Truth": [wandb.Image(test_gt[5], caption=f"Ground Truth")]})
-            # wandb.log({"prediction": [wandb.Image(pred_img[5], caption=f"Prediction Class {class_num}")]})
         
         return {'test_dice_score' : test_dice_score}
 
@@ -163,6 +188,7 @@ class SegModel(pl.LightningModule):
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, eta_min=1e-5)
         
         return [optimizer], [scheduler]
+        # return [optimizer]
     
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,

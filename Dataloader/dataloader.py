@@ -1,31 +1,10 @@
 import os
 import random
-
 import nibabel as nib
 import numpy as np
 from torch.utils.data import Dataset
 from os import walk
 from skimage import transform
-import torchvision.transforms as T
-import torch
-from Dataloader.utils import CustomCompose, SimpleRandomRotation, ElasticDeformation
-
-vol_transform = T.Compose([
-    T.RandomRotation(15),
-    T.RandomHorizontalFlip(p=0.5),
-    T.RandomResizedCrop((192, 192), scale=(0.95, 1.05), interpolation=T.InterpolationMode.NEAREST),
-    SimpleRandomRotation(),
-    T.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3]),
-])
-
-seg_transform = T.Compose([
-    T.RandomRotation(15),
-    T.RandomHorizontalFlip(p=0.5),
-    T.RandomResizedCrop((192, 192), scale=(0.95, 1.05), interpolation=T.InterpolationMode.NEAREST),
-    SimpleRandomRotation(),
-])
-
-elastic_transform = ElasticDeformation(100, 10.0)
 
 
 class Dataloader(Dataset):
@@ -125,44 +104,13 @@ class DataloaderRandom(Dataloader):
         return len(self.data)
 
     def __getitem__(self, idx):
-        # volume data
-        vol = torch.from_numpy(self.data[idx][0, None, :])
-
-        if self.seg_path is None:
-            return elastic_transform(vol_transform(vol))
-        # segment data
-        seg = torch.from_numpy(self.data[idx][1, None, :])
-
-        # make a seed with numpy generator
-        seed = np.random.randint(2147483647)
-
-        # fix python and torch random seed (python for custom rotations and torch for torchvision augmentations
-        # torch.cuda.manual_seed(seed)
-        # torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-        # torch.backends.cudnn.benchmark = False
-        # torch.backends.cudnn.deterministic = True
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        vol = vol_transform(vol)
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        vol = elastic_transform(vol)
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        seg = seg_transform(seg)
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        seg = elastic_transform(seg)
-
-        return vol, one_hot_encoding(seg, self.data_info["num_class"])
+        # print(self.data[idx][1, None, :].shape)
+        
+        # the line below is already returning the one-hot encoding of the labels (but we don't want that)        
+        # return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
+        
+        # this line below simply returns the ground truth
+        return self.data[idx][0, None, :], self.data[idx][1, None, :]
 
     def load_data(self):
 
@@ -237,11 +185,8 @@ class DataloaderCustom(Dataloader):
 
         if self.seg_path is None:
             # print("final slices", selected_slices_complete[:, 0].shape)
-            original = torch.from_numpy(selected_slices_complete[:, 0])
-            aug1 = elastic_transform(vol_transform(original))
-            aug2 = elastic_transform(vol_transform(original))
-            return original, aug1, aug2
-        # no augmentation here
+            return selected_slices_complete[:, 0]
+
         return selected_slices_complete[:, 0], one_hot_encoding(selected_slices_complete[:, 1],
                                                                 self.data_info["num_class"], True)
 
@@ -356,8 +301,14 @@ def crop_or_pad(slice, dim_new):
 
 
 def one_hot_encoding(seg, nb_classes, custom=False):
+    # print(seg.shape, seg.max())
+    # res = np.eye(nb_classes)[np.array(seg[0]).reshape(-1)]
+    # seg = res.reshape(list(seg[0].shape) + [nb_classes])
     if custom:
-        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(1, 4).squeeze(-1)
+        seg = (np.arange(nb_classes) == seg[:,0,..., None] - 1).astype(int)
     else:
-        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(0, 3).squeeze(-1)
+        seg = (np.arange(nb_classes) == seg[0,..., None] - 1).astype(int)
+    seg = np.moveaxis(seg, -1, 0)
+    # seg = np.eye(nb_classes)[seg[0]]
+    # print(seg.shape, seg.max())
     return seg
