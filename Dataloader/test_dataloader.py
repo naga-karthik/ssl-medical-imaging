@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import Dataloader.experiments_paper.data_init_acdc, Dataloader.experiments_paper.data_init_prostate_md
+from PIL import Image
+
 
 
 def test_custom_seg():
@@ -29,15 +31,16 @@ def test_augmentions():
     img_path = "../ACDC"
     seg_path = "../ACDC"
     train_ids = Dataloader.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
-    train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=True, seg_path=seg_path)
+    train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=True, seg_path=seg_path,
+                                     augmentation=True)
 
     for test_images, test_labels in train_dataset:
+        print(test_images.shape, test_labels.shape)
         fig, axs = plt.subplots(1, 2)
         fig.suptitle('Augementation Original (left) Original with Mask layover (Right)')
         axs[0].imshow(test_images.numpy()[0], cmap='gray')
-        axs[1].imshow(test_images.numpy()[0] - test_labels.numpy()[2], cmap='gray')
+        axs[1].imshow(test_images.numpy()[0] - test_labels.numpy()[0], cmap='gray')
         fig.show()
-        print(test_images.shape, test_labels.shape)
 
     train_loader = DataloaderCustom(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
 
@@ -45,9 +48,14 @@ def test_augmentions():
         for i in range(4):
             fig, axs = plt.subplots(1, 3)
             fig.suptitle('Augmentations')
-            axs[0].imshow(original.numpy()[i][0], cmap='gray')
-            axs[1].imshow(aug1[i][0], cmap='gray')
-            axs[2].imshow(aug2[i][0], cmap='gray')
+            # fft_p = (original.numpy()[0][i]).astype(np.uint8)
+            fft_p = original.numpy()[0][i]
+            im = Image.fromarray(fft_p*255.0)
+            im = im.convert('L')
+            im.save(f"img_{i}.png")
+            axs[0].imshow(original.numpy()[0][i], cmap='gray')
+            axs[1].imshow(aug1.numpy()[0][i], cmap='gray')
+            axs[2].imshow(aug2.numpy()[0][i], cmap='gray')
             fig.show()
         print(original.shape, aug1.shape, aug2.shape)
 
@@ -62,7 +70,8 @@ def test_dataloader_random():
     train_ids = Dataloader.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
     val_ids = Dataloader.experiments_paper.data_init_prostate_md.val_data(no_of_tr_imgs, comb_of_tr_imgs)
     test_ids = Dataloader.experiments_paper.data_init_prostate_md.test_data()
-    train_dataset = DataloaderRandom(md_prostate, train_ids, img_path, preprocessed_data=True, seg_path=seg_path)
+    train_dataset = DataloaderRandom(md_prostate, train_ids, img_path, preprocessed_data=True, seg_path=seg_path,
+                                     augmentation=True)
     val_dataset = DataloaderRandom(md_prostate, val_ids, img_path, preprocessed_data=True, seg_path=seg_path)
     test_dataset = DataloaderRandom(md_prostate, test_ids, img_path, preprocessed_data=True, seg_path=seg_path)
 
@@ -81,9 +90,10 @@ def test_dataloader_random():
     train_ids = Dataloader.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
     val_ids = Dataloader.experiments_paper.data_init_acdc.val_data(no_of_tr_imgs, comb_of_tr_imgs)
     test_ids = Dataloader.experiments_paper.data_init_acdc.test_data()
-    train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=False, seg_path=seg_path)
-    val_dataset = DataloaderRandom(acdc, val_ids, img_path, preprocessed_data=False, seg_path=seg_path)
-    test_dataset = DataloaderRandom(acdc, test_ids, img_path, preprocessed_data=False, seg_path=seg_path)
+    train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=True, seg_path=seg_path,
+                                     augmentation=True)
+    val_dataset = DataloaderRandom(acdc, val_ids, img_path, preprocessed_data=True, seg_path=seg_path)
+    test_dataset = DataloaderRandom(acdc, test_ids, img_path, preprocessed_data=True, seg_path=seg_path)
 
     for test_images, test_labels in train_dataset:
         print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
@@ -94,14 +104,22 @@ def test_dataloader_random():
     for test_images, test_labels in test_dataset:
         print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
+
 def preprocess_all_data():
     # preprocess all data
-    test_loader = DataloaderRandom(acdc, range(1, 101), "../ACDC", preprocessed_data=False, seg_path="../ACDC")
-    test_loader = DataloaderRandom(md_prostate, range(47), "../Task05_Prostate/images", preprocessed_data=False)
-    test_loader = DataloaderRandom(md_prostate, [0, 1, 2, 4, 6, 7, 10, 13, 14, 16, 17, 18, 20, 21, 24, 25, 28, 29,
-                                                 31, 32, 34, 35, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47],
-                                   "../Task05_Prostate/images", preprocessed_data=False, seg_path="../Task05_Prostate"
-                                                                                                  "/labels")
+    dataset_acdc = DataloaderRandom(acdc, range(1, 101), "../ACDC", preprocessed_data=False, seg_path="../ACDC")
+    DataloaderRandom(md_prostate, range(47), "../Task05_Prostate/images", preprocessed_data=False)
+    dataset_mdprostate = DataloaderRandom(md_prostate,
+                                          [0, 1, 2, 4, 6, 7, 10, 13, 14, 16, 17, 18, 20, 21, 24, 25, 28, 29,
+                                           31, 32, 34, 35, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47],
+                                          "../Task05_Prostate/images", preprocessed_data=False,
+                                          seg_path="../Task05_Prostate"
+                                                   "/labels")
+    for test_images, test_labels in dataset_acdc:
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
+
+    for test_images, test_labels in dataset_mdprostate:
+        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
 
 # code snippet finding out max_no_classes
@@ -132,6 +150,7 @@ print(max)
 
 # test_custom_vol_only()
 
+test_augmentions()
+# test_dataloader_random()
 # test_augmentions()
-test_dataloader_random()
-# test_augmentions()
+# preprocess_all_data()
