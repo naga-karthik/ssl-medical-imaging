@@ -24,7 +24,7 @@ import torchvision.transforms as transforms
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, ProjectorHead
 from Dataloader.init_data import acdc, md_prostate
-from Dataloader.dataloader import DataloaderRandom
+from Dataloader.dataloader import DataloaderGD_
 from Dataloader.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss
 
@@ -37,6 +37,7 @@ parser = argparse.ArgumentParser(description="gl-GR-Random Strategy Run 1")
 parser.add_argument('--exp_name', default='gl-GR-R_Test-SSL', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
+parser.add_argument('-partition', '--partition', default=4, help='Specifyg number of partitions')
 parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
 parser.add_argument('-cti', '--comb_train_imgs', default='c1', type=str, help='Combintation of Train imgs., options c1, c2, cr3, cr4, cr5')
 parser.add_argument('--img_path', default=img_path, type=str, help='Absolute path of the training data')
@@ -76,9 +77,9 @@ class EncoderPretrain(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DataloaderRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
-        self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
-        self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.train_dataset = DataloaderGD_(self.cfg.dataset, self.train_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.valid_dataset = DataloaderGD_(self.cfg.dataset, self.val_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.test_dataset = DataloaderGD_(self.cfg.dataset, self.test_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
 
         self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
         

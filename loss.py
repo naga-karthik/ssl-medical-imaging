@@ -158,7 +158,7 @@ class Loss:
         return -torch.log(torch.div(num, denom))
 
     def global_loss(self, prediction):
-        n, _, _ = prediction.shape
+        n, _ = prediction.shape
         loss = 0
         pos_set, augmentations = self.create_pos_set(prediction)
         m, _, _ = pos_set.shape
