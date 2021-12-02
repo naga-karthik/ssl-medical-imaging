@@ -5,6 +5,18 @@ import numpy as np
 from torch.utils.data import Dataset
 from os import walk
 from skimage import transform
+import torch
+import albumentations as A
+import cv2
+
+transform_fct = A.Compose([
+    A.Rotate(15),
+    A.HorizontalFlip(p=0.5),
+    A.RandomResizedCrop(192, 192, scale=(0.95, 1.05), interpolation=cv2.INTER_NEAREST),
+    A.RandomRotate90(p=0.5),
+    A.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3], saturation=0, hue=0),
+    A.ElasticTransform(alpha=1, sigma=50, alpha_affine=25),
+])
 
 
 class Dataloader(Dataset):
@@ -71,6 +83,7 @@ class Dataloader(Dataset):
                 filename_seg = f"{sub_folder}/patient{idx:03d}_frame04_gt{sub}.nii.gz"
             else:
                 print(f"ERROR: no suitable file found for patient{idx:03d}")
+                exit()
 
         return filename, filename_seg
 
@@ -93,26 +106,7 @@ class Dataloader(Dataset):
     def get_processed_seg(self, filename_seg):
         return self.get_processed_data(filename_seg, self.seg_path, True)
 
-
-class DataloaderRandom(Dataloader):
-    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
-        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
-        self.data = self.load_data()
-        print(data_info, "final shape", self.data.shape)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        # print(self.data[idx][1, None, :].shape)
-        
-        # the line below is already returning the one-hot encoding of the labels (but we don't want that)        
-        # return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
-        
-        # this line below simply returns the ground truth
-        return self.data[idx][0, None, :], self.data[idx][1, None, :]
-
-    def load_data(self):
+    def load_data_full(self):
 
         processed_volume = []
         processed_seg = []
@@ -146,7 +140,51 @@ class DataloaderRandom(Dataloader):
         return processed_data_complete
 
 
-class DataloaderCustom(Dataloader):
+class DataloaderRandom(Dataloader):
+    """
+    returns random slices for fine-tuning
+    """
+
+    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None, augmentation=False):
+        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
+        self.data = super().load_data_full()
+        self.augmentation = augmentation
+        print(data_info, "final shape", self.data.shape)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # volume data
+        vol = self.data[idx][0]
+
+        if self.seg_path is None:
+            if self.augmentation:
+                vol = vol.astype(np.float32)
+                vol = transform_fct(image=vol)['image']
+            return torch.from_numpy(vol[None, :])
+
+        # segment data
+        seg = self.data[idx][1]
+
+        if self.augmentation:
+            vol = vol.astype(np.float32)
+            seg = seg.astype(np.float32)
+            transformed = transform_fct(image=vol, mask=seg)
+            vol = transformed['image']
+            seg = transformed['mask']
+
+        vol = torch.from_numpy(vol[None, :])
+        seg = torch.from_numpy(seg[None, :])
+
+        return vol, seg  # one_hot_encoding(seg, self.data_info["num_class"])
+
+    # TODO implement random strategy data loader (G_R)
+
+    # TODO implement G_D data loader
+
+
+class DataloaderGD_(Dataloader):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
         self.padding_list = []
@@ -164,31 +202,35 @@ class DataloaderCustom(Dataloader):
         # remove padding
         slices = slices[:, :-self.padding_list[idx]]
         no_all_slices = slices[0].shape[0]
+        # print(slices.shape)
 
-        selected_slices = []
-        group_size = no_all_slices // self.partition
-        for i in range(self.partition):
-            # for last partition, take random slice until the end
-            if i == self.partition - 1:
-                random_slice_idx = random.randint(i * group_size, no_all_slices - 1)
-                # print(f"random value between {i * group_size} and {no_all_slices - 1} is {random_slice_idx}")
-            else:
-                random_slice_idx = random.randint(i * group_size, (i + 1) * group_size - 1)
-                # print(f"random value between {i * group_size} and {(i + 1) * group_size - 1} is {random_slice_idx}")
+        # idxs = np.arange(no_all_slices)
+        slice_per_partion = no_all_slices // self.partition
+        rand_ints = np.random.randint(low=0, high=slice_per_partion, size=self.partition)
 
-            random_slice = slices[:, random_slice_idx]
-            selected_slices.append(random_slice)
+        partition_starts = np.arange(self.partition) * slice_per_partion
+        rand_indxs = np.asarray(partition_starts + rand_ints)
+        # print("slices", rand_ints, partition_starts)
 
-        selected_slices_complete = np.array(selected_slices)
-
-        selected_slices_complete = selected_slices_complete[:, :, None, :, :]
+        # selected_slices_complete = np.take(slices, rand_indxs)
+        selected_slices_complete = slices[:, rand_indxs, :]
+        # print("shape", selected_slices_complete.shape)
 
         if self.seg_path is None:
-            # print("final slices", selected_slices_complete[:, 0].shape)
-            return selected_slices_complete[:, 0]
-
-        return selected_slices_complete[:, 0], one_hot_encoding(selected_slices_complete[:, 1],
-                                                                self.data_info["num_class"], True)
+            original = selected_slices_complete.astype(np.float32)
+            # print("datatype", original.shape, original.dtype)
+            aug1 = np.array([transform_fct(image=xi)['image'] for xi in original[0]])[None, ...]
+            aug2 = np.array([transform_fct(image=xi)['image'] for xi in original[0]])[None, ...]
+            # original = selected_slices_complete
+            # aug1 = (aug1 / 255).astype(np.float64)
+            # aug2 = (aug2 / 255).astype(np.float64)
+            # print(original.shape, aug1.shape, aug2.shape)
+            return torch.from_numpy(original), torch.from_numpy(aug1), torch.from_numpy(aug2)
+        # no augmentation here
+        print("THIS PART IS NOT CORRECTLY IMPLEMENTED AS NOT REQUIRED")
+        return selected_slices_complete[:, 0], selected_slices_complete[:,
+                                               1]  # one_hot_encoding(selected_slices_complete[:, 1],
+        #  self.data_info["num_class"], True)
 
     def load_data(self):
 
