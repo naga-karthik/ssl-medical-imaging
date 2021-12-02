@@ -185,7 +185,7 @@ class DataloaderRandom(Dataloader):
     # TODO implement G_D data loader
 
 
-class DataloaderCustom(Dataloader):
+class DataloaderGD_(Dataloader):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
         self.padding_list = []

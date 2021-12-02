@@ -1,4 +1,4 @@
-from Dataloader.dataloader import DataloaderCustom, DataloaderRandom
+from Dataloader.dataloader import DataloaderGD_, DataloaderRandom
 from Dataloader.init_data import md_prostate, acdc
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from PIL import Image
 
 
 def test_custom_seg():
-    test_loader = DataloaderCustom(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False,
+    test_loader = DataloaderGD_(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False,
                                    seg_path="../Task05_Prostate/labels")
 
     for test_images, test_labels in test_loader:
@@ -17,7 +17,7 @@ def test_custom_seg():
 
 
 def test_custom_vol_only():
-    test_dataset = DataloaderCustom(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False)
+    test_dataset = DataloaderGD_(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False)
 
     for original, aug1, aug2 in test_dataset:
         print(original.shape, aug1.shape, aug2.shape)
@@ -42,7 +42,7 @@ def test_augmentions():
         axs[1].imshow(test_images.numpy()[0] - test_labels.numpy()[0], cmap='gray')
         fig.show()
 
-    train_loader = DataloaderCustom(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
+    train_loader = DataloaderGD_(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
 
     for original, aug1, aug2 in train_loader:
         for i in range(4):
