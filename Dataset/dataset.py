@@ -9,6 +9,7 @@ from skimage import transform
 import torch
 import albumentations as A
 import cv2
+import SimpleITK as sitk
 
 transform_fct = A.Compose([
     A.Rotate(15),
@@ -57,6 +58,28 @@ class DatasetGeneric(Dataset):
         elif self.data_info["name"] == "MD_PROSTATE":
             affine[0, 0] = self.data_info["resolution"][0]
             affine[1, 1] = self.data_info["resolution"][1]
+
+        bias_correction = False
+
+        if bias_correction:
+
+            # parameters for ACDC
+            threshold_value = 0.001
+            n_fitting_levels = 4
+            n_iters = 50
+
+            itk_image = sitk.GetImageFromArray(volume)
+            inputImage = sitk.Cast(itk_image, sitk.sitkFloat32)
+
+            # Apply N4 bias correction
+            corrector = sitk.N4BiasFieldCorrectionImageFilter()
+            corrector.SetConvergenceThreshold(threshold_value)
+            corrector.SetMaximumNumberOfIterations([int(n_iters)] * n_fitting_levels)
+
+            # Save the bias corrected output file
+            output = corrector.Execute(inputImage)
+
+            volume = sitk.GetArrayViewFromImage(output)
 
         array_vol = nib.Nifti1Image(volume, affine)
         complete_path = os.path.join(str(path), filename)
