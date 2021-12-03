@@ -15,8 +15,8 @@ n_iters = 50
 # in_file_name='../Task05_Prostate/images/prostate_00.nii.gz'
 # out_file_name='../Task05_Prostate/images/prostate_00_bias_corr.nii.gz'
 
-in_file_name= "../ACDC/patient001/patient001_frame01.nii.gz"
-out_file_name="../ACDC/patient001/patient001_frame01_bias_corr.nii.gz"
+in_file_name= "../ACDC/patient001/patient001_frame01_prep.nii.gz"
+out_file_name="../ACDC/patient001/patient001_frame01_bias_corr_prep.nii.gz"
 
 # Read the image
 inputImage = sitk.ReadImage(in_file_name)

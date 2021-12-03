@@ -1,4 +1,4 @@
-from Dataloader.dataloader import DataloaderGD_, DataloaderRandom
+from Dataloader.dataloader import DataloaderGDMinus, DataloaderRandom, DataloaderGR
 from Dataloader.init_data import md_prostate, acdc
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,17 +7,16 @@ import Dataloader.experiments_paper.data_init_acdc, Dataloader.experiments_paper
 from PIL import Image
 
 
-
 def test_custom_seg():
-    test_loader = DataloaderGD_(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False,
-                                   seg_path="../Task05_Prostate/labels")
+    test_loader = DataloaderGDMinus(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False,
+                                    seg_path="../Task05_Prostate/labels")
 
     for test_images, test_labels in test_loader:
         print(test_images.shape, test_labels.shape)
 
 
 def test_custom_vol_only():
-    test_dataset = DataloaderGD_(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False)
+    test_dataset = DataloaderGDMinus(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False)
 
     for original, aug1, aug2 in test_dataset:
         print(original.shape, aug1.shape, aug2.shape)
@@ -42,20 +41,21 @@ def test_augmentions():
         axs[1].imshow(test_images.numpy()[0] - test_labels.numpy()[0], cmap='gray')
         fig.show()
 
-    train_loader = DataloaderGD_(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
+    train_loader = DataloaderGDMinus(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
 
     for original, aug1, aug2 in train_loader:
         for i in range(4):
             fig, axs = plt.subplots(1, 3)
             fig.suptitle('Augmentations')
             # fft_p = (original.numpy()[0][i]).astype(np.uint8)
-            fft_p = original.numpy()[0][i]
-            im = Image.fromarray(fft_p*255.0)
+            fft_p = original.numpy()[i][0]
+            im = Image.fromarray(fft_p * 255.0)
             im = im.convert('L')
             im.save(f"img_{i}.png")
-            axs[0].imshow(original.numpy()[0][i], cmap='gray')
-            axs[1].imshow(aug1.numpy()[0][i], cmap='gray')
-            axs[2].imshow(aug2.numpy()[0][i], cmap='gray')
+            print(original.numpy()[i].shape)
+            axs[0].imshow(original.numpy()[i, 0], cmap='gray')
+            axs[1].imshow(aug1.numpy()[i, 0], cmap='gray')
+            axs[2].imshow(aug2.numpy()[i, 0], cmap='gray')
             fig.show()
         print(original.shape, aug1.shape, aug2.shape)
 
@@ -73,7 +73,7 @@ def test_dataloader_random():
     train_dataset = DataloaderRandom(md_prostate, train_ids, img_path, preprocessed_data=True, seg_path=seg_path,
                                      augmentation=True)
     val_dataset = DataloaderRandom(md_prostate, val_ids, img_path, preprocessed_data=True, seg_path=seg_path)
-    test_dataset = DataloaderRandom(md_prostate, test_ids, img_path, preprocessed_data=True, seg_path=seg_path)
+    test_dataset = DataloaderRandom(md_prostate, test_ids, img_path, preprocessed_data=True)
 
     for test_images, test_labels in train_dataset:
         print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
@@ -81,8 +81,8 @@ def test_dataloader_random():
     for test_images, test_labels in val_dataset:
         print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
-    for test_images, test_labels in test_dataset:
-        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
+    for test_images in test_dataset:
+        print(test_images.shape)
 
     # ACDC
     img_path = "../ACDC"
@@ -93,7 +93,7 @@ def test_dataloader_random():
     train_dataset = DataloaderRandom(acdc, train_ids, img_path, preprocessed_data=True, seg_path=seg_path,
                                      augmentation=True)
     val_dataset = DataloaderRandom(acdc, val_ids, img_path, preprocessed_data=True, seg_path=seg_path)
-    test_dataset = DataloaderRandom(acdc, test_ids, img_path, preprocessed_data=True, seg_path=seg_path)
+    test_dataset = DataloaderRandom(acdc, test_ids, img_path, preprocessed_data=True)
 
     for test_images, test_labels in train_dataset:
         print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
@@ -101,8 +101,49 @@ def test_dataloader_random():
     for test_images, test_labels in val_dataset:
         print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
 
-    for test_images, test_labels in test_dataset:
-        print(test_images.shape, test_labels.shape, torch.min(test_labels), torch.max(test_labels))
+    for test_images in test_dataset:
+        print(test_images.shape)
+
+
+def test_dataloaderGR():
+    no_of_tr_imgs = 'tr1'
+    # change this to 'c1', 'c2', 'cr3', 'cr4', 'cr5'
+    comb_of_tr_imgs = 'c1'
+    # md_prostate
+    img_path = "../Task05_Prostate/images"
+    train_ids = Dataloader.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
+    train_dataset = DataloaderGR(md_prostate, train_ids, img_path, preprocessed_data=True)
+
+    for aug1, aug2 in train_dataset:
+        print(aug1.shape, aug2.shape)
+
+    # ACDC
+    img_path = "../ACDC"
+    train_ids = Dataloader.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
+    train_dataset = DataloaderGR(acdc, train_ids, img_path, preprocessed_data=True)
+
+    for aug1, aug2 in train_dataset:
+        print(aug1.shape, aug2.shape)
+
+def test_dataloaderGDMinus():
+    no_of_tr_imgs = 'tr1'
+    # change this to 'c1', 'c2', 'cr3', 'cr4', 'cr5'
+    comb_of_tr_imgs = 'c1'
+    # md_prostate
+    img_path = "../Task05_Prostate/images"
+    train_ids = Dataloader.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
+    train_dataset = DataloaderGDMinus(md_prostate, train_ids, 4, img_path, preprocessed_data=True)
+
+    for original, aug1, aug2 in train_dataset:
+        print(original.shape, aug1.shape, aug2.shape)
+
+    # ACDC
+    img_path = "../ACDC"
+    train_ids = Dataloader.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
+    train_dataset = DataloaderGDMinus(acdc, train_ids, 4, img_path, preprocessed_data=True)
+
+    for original, aug1, aug2 in train_dataset:
+        print(original.shape, aug1.shape, aug2.shape)
 
 
 def preprocess_all_data():
@@ -150,7 +191,10 @@ print(max)
 
 # test_custom_vol_only()
 
-test_augmentions()
+# test_augmentions()
 # test_dataloader_random()
 # test_augmentions()
 # preprocess_all_data()
+test_dataloader_random()
+# test_dataloaderGR()
+# test_dataloaderGDMinus()
