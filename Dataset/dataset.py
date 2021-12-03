@@ -20,7 +20,7 @@ transform_fct = A.Compose([
 ])
 
 
-class Dataloader(Dataset):
+class DatasetGeneric(Dataset):
 
     def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
         """
@@ -129,19 +129,23 @@ class Dataloader(Dataset):
             # print(idx, len(processed_volume))
 
         processed_volume_complete = np.array(processed_volume)
+
         if self.seg_path is None:
             # print("final volume", processed_volume_complete.shape)
+            processed_volume_complete = processed_volume_complete.astype(np.float32)
             return processed_volume_complete[:, None, ...]
 
         processed_seg_complete = np.array(processed_seg)
         # print(processed_volume_complete.shape, processed_seg_complete.shape)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
         processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+
+        processed_data_complete = processed_data_complete.astype(np.float32)
         # print("final volume", processed_data_complete.shape)
         return processed_data_complete
 
 
-class DataloaderRandom(Dataloader):
+class DatasetRandom(DatasetGeneric):
     """
     returns random slices for fine-tuning
     """
@@ -159,6 +163,7 @@ class DataloaderRandom(Dataloader):
 
         # volume data
         vol = self.data[idx][0]
+        vol = vol.astype(np.float32)
 
         if self.seg_path is None:
             if self.augmentation:
@@ -168,10 +173,9 @@ class DataloaderRandom(Dataloader):
 
         # segment data
         seg = self.data[idx][1]
+        seg = seg.astype(np.float32)
 
         if self.augmentation:
-            vol = vol.astype(np.float32)
-            seg = seg.astype(np.float32)
             transformed = transform_fct(image=vol, mask=seg)
             vol = transformed['image']
             seg = transformed['mask']
@@ -182,7 +186,7 @@ class DataloaderRandom(Dataloader):
         return vol, seg
 
 
-class DataloaderGR(Dataloader):
+class DatasetGR(DatasetGeneric):
     """
        returns random slices for training
        """
@@ -198,9 +202,9 @@ class DataloaderGR(Dataloader):
     def __getitem__(self, idx):
         # volume data
         vol = self.data[idx][0]
+        vol = vol.astype(np.float32)
 
         if self.seg_path is None:
-            vol = vol.astype(np.float32)
             vol_aug1 = transform_fct(image=vol)['image']
             vol_aug2 = transform_fct(image=vol)['image']
             return torch.from_numpy(vol_aug1[None, :]), torch.from_numpy(vol_aug2[None, :])
@@ -210,7 +214,7 @@ class DataloaderGR(Dataloader):
 
 # TODO implement data loader GD
 
-class DataloaderGDMinus(Dataloader):
+class DatasetGDMinus(DatasetGeneric):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
         self.padding_list = []
@@ -231,7 +235,6 @@ class DataloaderGDMinus(Dataloader):
 
         slice_per_partion = no_all_slices // self.partition
         rand_ints = np.random.randint(low=0, high=slice_per_partion, size=self.partition)
-
 
         partition_starts = np.arange(self.partition) * slice_per_partion
         rand_indxs = np.asarray(partition_starts + rand_ints)
