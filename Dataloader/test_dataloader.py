@@ -223,7 +223,7 @@ print(max)
 
 # test_custom_vol_only()
 
-test_augmentions()
+# test_augmentions()
 # test_dataloader_random()
 # test_augmentions()
 # preprocess_all_data()
