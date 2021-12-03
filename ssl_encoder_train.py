@@ -1,35 +1,23 @@
 # utility packages
-from functools import cmp_to_key
-import os
-import time
 import argparse
-from torch._C import device
+import time
 
-import numpy as np
-from torch.nn.modules.module import T
-import matplotlib.pyplot as plt
-from torch.utils.data.sampler import WeightedRandomSampler
 timestamp = time.time()
 
 # machine learning packages
-import wandb
-import torch
-import torch.nn as nn
 import torch.optim as optim
 import pytorch_lightning as pl
-from torch.nn import functional as F
 from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
 
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, ProjectorHead
-from Dataloader.init_data import acdc, md_prostate
+from Dataloader.init_data import acdc
 from Dataloader.dataloader import DataloaderGD_
-from Dataloader.experiments_paper import data_init_acdc, data_init_prostate_md
+from Dataloader.experiments_paper import data_init_acdc
 from loss import Loss
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
-seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
+seg_path = None
 
 parser = argparse.ArgumentParser(description="gl-GR-Random Strategy Run 1")
 
@@ -63,13 +51,6 @@ class EncoderPretrain(pl.LightningModule):
     def __init__(self, cfg):
         super(EncoderPretrain, self).__init__()
         self.cfg = cfg
-        # self.net = SegUnetFullModel(
-        #     in_channels=self.cfg.in_channels, 
-        #     num_filters_list=self.cfg.num_filters_list,
-        #     fc_units=self.cfg.fc_units_list,
-        #     g1_out_dim=self.cfg.g1_out_dim, 
-        #     num_classes=self.cfg.num_classes
-        # )
         self.e = UNetEncoder(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_filters)
         self.g1 = ProjectorHead(encoder_init_filters=self.cfg.encoder_init_filters, out_dim=self.cfg.out_dim)
 
@@ -157,8 +138,10 @@ class EncoderPretrain(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,
+        data = DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,
                              shuffle = True, drop_last=True, num_workers=self.cfg.num_workers)
+        print(f'DATA SET SIZE {data.size()}')
+        return data
 
     def val_dataloader(self):
         return DataLoader(self.valid_dataset, batch_size = self.cfg.batch_size,
@@ -181,7 +164,7 @@ def main(cfg):
 
     # to save the best model on validation
     checkpoint = pl.callbacks.ModelCheckpoint(
-        filename="best_model"+str(timestamp),
+        filename="best_model_encoder_pretrain"+str(timestamp),
         monitor="valid_loss",
         save_top_k=1,
         mode="max",
