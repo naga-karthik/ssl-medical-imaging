@@ -185,7 +185,7 @@ class DataloaderRandom(Dataloader):
     # TODO implement G_D data loader
 
 
-class DataloaderGD_(Dataloader):
+class EncoderDataset(Dataloader):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
         self.padding_list = []
@@ -203,7 +203,6 @@ class DataloaderGD_(Dataloader):
         # remove padding
         slices = slices[:, :-self.padding_list[idx]]
         no_all_slices = slices[0].shape[0]
-        # print(slices.shape)
 
         # idxs = np.arange(no_all_slices)
         slice_per_partion = no_all_slices // self.partition
@@ -211,27 +210,17 @@ class DataloaderGD_(Dataloader):
 
         partition_starts = np.arange(self.partition) * slice_per_partion
         rand_indxs = np.asarray(partition_starts + rand_ints)
-        # print("slices", rand_ints, partition_starts)
 
-        # selected_slices_complete = np.take(slices, rand_indxs)
         selected_slices_complete = slices[:, rand_indxs, :]
-        # print("shape", selected_slices_complete.shape)
 
-        if self.seg_path is None:
-            original = selected_slices_complete.astype(np.float32)
-            # print("datatype", original.shape, original.dtype)
-            aug1 = np.array([transform_fct(image=xi)['image'] for xi in original[0]])[None, ...]
-            aug2 = np.array([transform_fct(image=xi)['image'] for xi in original[0]])[None, ...]
-            # original = selected_slices_complete
-            # aug1 = (aug1 / 255).astype(np.float64)
-            # aug2 = (aug2 / 255).astype(np.float64)
-            # print(original.shape, aug1.shape, aug2.shape)
-            return torch.from_numpy(original), torch.from_numpy(aug1), torch.from_numpy(aug2)
-        # no augmentation here
-        print("THIS PART IS NOT CORRECTLY IMPLEMENTED AS NOT REQUIRED")
-        return selected_slices_complete[:, 0], selected_slices_complete[:,
-                                               1]  # one_hot_encoding(selected_slices_complete[:, 1],
-        #  self.data_info["num_class"], True)
+        original = selected_slices_complete.astype(np.float32)
+        aug1 = np.array([transform_fct(image=xi)['image'] for xi in original[0]])[None, ...]
+        aug2 = np.array([transform_fct(image=xi)['image'] for xi in original[0]])[None, ...]
+
+
+        # start gwen changes
+        combine = np.concatenate((original, aug1, aug2), axis=1).reshape(-1, 2)
+        return torch.from_numpy(combine)
 
     def load_data(self):
 

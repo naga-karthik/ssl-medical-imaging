@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, ProjectorHead
 from Dataloader.init_data import acdc
-from Dataloader.dataloader import DataloaderGD_
+from Dataloader.dataloader import EncoderDataset
 from Dataloader.experiments_paper import data_init_acdc
 from loss import Loss
 
@@ -58,9 +58,9 @@ class EncoderPretrain(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DataloaderGD_(self.cfg.dataset, self.train_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
-        self.valid_dataset = DataloaderGD_(self.cfg.dataset, self.val_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
-        self.test_dataset = DataloaderGD_(self.cfg.dataset, self.test_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path)
+        self.train_dataset = EncoderDataset(self.cfg.dataset, self.train_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = EncoderDataset(self.cfg.dataset, self.val_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.test_dataset = EncoderDataset(self.cfg.dataset, self.test_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
         self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
         
@@ -84,7 +84,7 @@ class EncoderPretrain(pl.LightningModule):
 
     def validation_step(self, batch, batch_nb):
         print(len(batch))
-        val_img, val_gt = batch
+        val_img = batch
         val_img = val_img.float() #.to(self.device)
 
         val_encoder_out = self.e(val_img)
@@ -98,7 +98,7 @@ class EncoderPretrain(pl.LightningModule):
         return {'loss' : loss}
     
     def test_step(self, batch, batch_nb):
-        test_img, test_gt = batch
+        test_img = batch
         test_img = test_img.float()
 
         y_hat = self.forward(test_img)
