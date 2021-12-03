@@ -5,10 +5,10 @@ import pathlib
 
 import nibabel as nib
 from os import path
-from Dataloader.init_data import md_prostate, acdc
+from Dataset.init_data import md_prostate, acdc
 
 # TODO
-from Dataloader.init_data import md_prostate, acdc
+from Dataset.init_data import md_prostate, acdc
 
 img_path_md_prostate = "../Task05_Prostate/images"
 seg_path_md_prostate = "../Task05_Prostate/labels"
