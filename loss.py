@@ -204,9 +204,9 @@ class Loss:
     # on the Loss object you created, loss type 0 is dice, loss type 1 is global
     def compute(self, aug1, aug2=None, unaug=None, target=None, multiclass=False):
         aug1 = aug1.to(self.device)
-        if aug2:
+        if aug2 != None:
             aug2 = aug2.to(self.device)
-        if unaug:
+        if unaug != None:
             unaug = unaug.to(self.device)
 
         if self.loss_type == 0:
