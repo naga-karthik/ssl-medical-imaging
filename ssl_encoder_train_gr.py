@@ -1,6 +1,11 @@
 # utility packages
 import argparse
 import time
+import os
+
+# uncomment for local run
+#os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+#os.environ["WANDB_API_KEY"] = "c2afd1f40f749fb27430c7ed36a6f3f2d425e6dc"
 
 timestamp = time.time()
 
@@ -16,6 +21,7 @@ from Dataset.dataset import DatasetGR
 from Dataset.experiments_paper import data_init_acdc
 from loss import Loss
 
+#img_path = "ACDC" # for local run
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = None
 
@@ -80,7 +86,7 @@ class EncoderPretrain(pl.LightningModule):
 
         # Gr loss
         loss = self.loss.compute(out_aug1, out_aug2)
-        self.log('pretrain_encoder_gr', loss)
+        self.log('train_loss', loss, on_step=False, on_epoch=True)
 
         return {'loss' : loss}
 
@@ -95,7 +101,7 @@ class EncoderPretrain(pl.LightningModule):
 
         # Gr loss
         loss = self.loss.compute(out_aug1, out_aug2)
-        self.log('pretrain_encoder_gr', loss)
+        self.log('valid_loss', loss, on_step=False, on_epoch=True)
 
         return {'loss': loss}
 
@@ -139,7 +145,8 @@ def main(cfg):
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')
 
     trainer = pl.Trainer(
-        devices=cfg.num_gpus, accelerator="gpu", strategy="ddp",
+        devices=cfg.num_gpus, accelerator="gpu", 
+        strategy="ddp",
         logger=wandb_logger,
         callbacks=[checkpoint, lr_monitor],
         max_epochs=cfg.epochs,

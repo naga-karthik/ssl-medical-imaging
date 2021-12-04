@@ -83,7 +83,7 @@ class Loss:
     # cosine similarity
     def cos_sim(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
-        vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), -1, -2)
+        vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), 0, -1)
         return torch.matmul(vect1_norm, vect2_norm)
 
 
@@ -91,7 +91,7 @@ class Loss:
     def create_pos_set(self, aug1, aug2, unaug):
         n = aug1.size(dim=0)
         c = aug1.size(dim=1)
-
+        
         if self.encoder_strategy == 1:
            pos = torch.zeros(n, 2, c)
            aug_type = torch.zeros(n, 2)
@@ -107,8 +107,8 @@ class Loss:
             # loss type Gr only uses aug1 and aug2, using notation from the paper: pos pairs are (x_i_bar, x_i_hat)
             if self.encoder_strategy == 1:
                 pairs = torch.zeros(1, 2, c)
-                pairs[1, 1, :] = aug1[i, :]
-                pairs[1, 2, :] = aug2[i, :]
+                pairs[0, 0, :] = aug1[i, :]
+                pairs[0, 1, :] = aug2[i, :]
                 aug_type[i, :] = torch.tensor([1., 2.])
                 pos[i, :, :] = pairs
 
@@ -145,11 +145,16 @@ class Loss:
         
         # returns a tensor with the pos image removed
         if self.encoder_strategy == 1:
+            skip = False # flag to modify idx after skip
             for i in range(n):
                 if i == pos_set_idx:
-                    pass
+                    skip = True
                 else:
-                    neg[i, :] = arr[i, :]
+                    if skip:
+                        j = i - 1
+                    else:
+                        j = i
+                    neg[j, :] = arr[j, :]
         else:
             # TODO: implement neg pair sorting, need partition info
             pass
@@ -184,7 +189,7 @@ class Loss:
                 neg_set1 = self.create_neg_set(aug2, i)
             
             # pass pos_im1, pos_im2 and neg set to individual loss function<-- image order matters!
-            l1 = self.individual_global_loss(pos_set[i, 1, :], pos_set[i, 2, :], neg_set1)
+            l1 = self.individual_global_loss(pos_set[i, 0, :], pos_set[i, 1, :], neg_set1)
             
             if aug_type[i, 1] == 0:
                 neg_set2 = self.create_neg_set(unaug, i)
@@ -194,7 +199,7 @@ class Loss:
                 neg_set2 = self.create_neg_set(aug2, i)
             
             # pass pos_im2, pos_im1 and neg set to individual loss function <-- image order matters!
-            l2 = self.individual_global_loss(pos_set[i, 2, :], pos_set[i, 1, :], neg_set2)
+            l2 = self.individual_global_loss(pos_set[i, 0, :], pos_set[i, 1, :], neg_set2)
             
             loss += l1 + l2
 
@@ -208,7 +213,6 @@ class Loss:
             aug2 = aug2.to(self.device)
         if unaug != None:
             unaug = unaug.to(self.device)
-
         if self.loss_type == 0:
             target = target.to(self.device)
             return self.dice_loss_v2(aug1, target, multiclass)    # the new, "working" dice loss
