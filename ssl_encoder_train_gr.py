@@ -78,10 +78,6 @@ class EncoderPretrain(pl.LightningModule):
         encoder_out_aug2 = self.e(train_aug2)  # self(train_img)
         out_aug2 = self.g1(encoder_out_aug2)
 
-        if batch_nb == 0: # once per epoch
-            fig = visualize(out_aug1, train_aug1, None)
-            wandb.log({"Training Output Visualizations": fig})
-
         # Gr loss
         loss = self.loss.compute(out_aug1, out_aug2)
         self.log('pretrain_encoder_gr', loss)
@@ -96,10 +92,6 @@ class EncoderPretrain(pl.LightningModule):
         out_aug1 = self.g1(encoder_out_aug1)
         encoder_out_aug2 = self.e(val_aug2)  # self(train_img)
         out_aug2 = self.g1(encoder_out_aug2)
-
-        if batch_nb == 0: # once per epoch
-            fig = visualize(out_aug1, train_aug1, None)
-            wandb.log({"Validation Output Visualizations": fig})
 
         # Gr loss
         loss = self.loss.compute(out_aug1, out_aug2)
