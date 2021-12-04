@@ -58,9 +58,9 @@ class EncoderPretrain(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
-        self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
-        self.test_dataset = DatasetGR(self.cfg.dataset, self.test_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.test_dataset = DatasetGR(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
         self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
         
