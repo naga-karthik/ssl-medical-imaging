@@ -69,7 +69,7 @@ class EncoderPretrain(pl.LightningModule):
         g1_out = self.g1(e_out)
         return g1_out
     
-    def training_step(self, batch):
+    def training_step(self, batch, batch_nb):
         train_aug1, train_aug2 = batch
         train_aug1, train_aug2 = train_aug1.float(), train_aug2.float()
 
@@ -78,13 +78,17 @@ class EncoderPretrain(pl.LightningModule):
         encoder_out_aug2 = self.e(train_aug2)  # self(train_img)
         out_aug2 = self.g1(encoder_out_aug2)
 
+        if batch_nb == 0: # once per epoch
+            fig = visualize(out_aug1, train_aug1, None)
+            wandb.log({"Training Output Visualizations": fig})
+
         # Gr loss
         loss = self.loss.compute(out_aug1, out_aug2)
         self.log('pretrain_encoder_gr', loss)
 
         return {'loss' : loss}
 
-    def validation_step(self, batch):
+    def validation_step(self, batch, batch_nb):
         val_aug1, val_aug2 = batch
         val_aug1, val_aug2 = val_aug1.float(), val_aug2.float()
 
@@ -92,6 +96,10 @@ class EncoderPretrain(pl.LightningModule):
         out_aug1 = self.g1(encoder_out_aug1)
         encoder_out_aug2 = self.e(val_aug2)  # self(train_img)
         out_aug2 = self.g1(encoder_out_aug2)
+
+        if batch_nb == 0: # once per epoch
+            fig = visualize(out_aug1, train_aug1, None)
+            wandb.log({"Validation Output Visualizations": fig})
 
         # Gr loss
         loss = self.loss.compute(out_aug1, out_aug2)
