@@ -11,9 +11,9 @@ from torch.utils.data import DataLoader
 
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, ProjectorHead
-from Dataloader.init_data import acdc
-from Dataloader.dataloader import EncoderDataset
-from Dataloader.experiments_paper import data_init_acdc
+from Dataset.init_data import acdc
+from Dataset.dataset import DatasetGR
+from Dataset.experiments_paper import data_init_acdc
 from loss import Loss
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
@@ -58,9 +58,9 @@ class EncoderPretrain(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = EncoderDataset(self.cfg.dataset, self.train_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
-        self.valid_dataset = EncoderDataset(self.cfg.dataset, self.val_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
-        self.test_dataset = EncoderDataset(self.cfg.dataset, self.test_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.test_dataset = DatasetGR(self.cfg.dataset, self.test_ids_acdc, self.cfg.partition, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
         self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
         
@@ -69,68 +69,38 @@ class EncoderPretrain(pl.LightningModule):
         g1_out = self.g1(e_out)
         return g1_out
     
-    def training_step(self, batch, batch_nb):
-        train_img, _ = batch
-        train_img = train_img.float()
-        
-        encoder_out = self.e(train_img)  # self(train_img)
-        out_final = self.g1(encoder_out)
-        
+    def training_step(self, batch):
+        train_aug1, train_aug2 = batch
+        train_aug1, train_aug2 = train_aug1.float(), train_aug2.float()
+
+        encoder_out_aug1 = self.e(train_aug1)  # self(train_img)
+        out_aug1 = self.g1(encoder_out_aug1)
+        encoder_out_aug2 = self.e(train_aug2)  # self(train_img)
+        out_aug2 = self.g1(encoder_out_aug2)
+
         # Gr loss
-        loss = self.loss.compute(out_final)
+        loss = self.loss.compute(out_aug1, out_aug2)
         self.log('pretrain_encoder_gr', loss)
 
         return {'loss' : loss}
 
-    def validation_step(self, batch, batch_nb):
-        print(len(batch))
-        val_img = batch
-        val_img = val_img.float() #.to(self.device)
+    def validation_step(self, batch):
+        val_aug1, val_aug2 = batch
+        val_aug1, val_aug2 = val_aug1.float(), val_aug2.float()
 
-        val_encoder_out = self.e(val_img)
-        val_out_final = self.g1(val_encoder_out)
+        encoder_out_aug1 = self.e(val_aug1)  # self(train_img)
+        out_aug1 = self.g1(encoder_out_aug1)
+        encoder_out_aug2 = self.e(val_aug2)  # self(train_img)
+        out_aug2 = self.g1(encoder_out_aug2)
 
         # Gr loss
-        loss = self.loss.compute(val_out_final)
+        loss = self.loss.compute(out_aug1, out_aug2)
         self.log('pretrain_encoder_gr', loss)
-        self.log('valid_gr_loss', loss)
 
-        return {'loss' : loss}
-    
-    def test_step(self, batch, batch_nb):
-        test_img = batch
-        test_img = test_img.float()
+        return {'loss': loss}
 
-        y_hat = self.forward(test_img)
+    # removed test step
 
-        # # print the shapes of all tensors first
-        # print(f"test image shape: {test_img.shape}")    # shape: [batch_size, 1, 192, 192]
-        # print(f"test gt shape: {test_gt.shape}")        # shape: [batch_size, 1, 192, 192]
-        # print(f"prediction shape: {y_hat.shape}")       # shape: [batch_size, num_classes, 192, 192]
-
-        '''if batch_nb % 20 == 0:
-            # plot every 20th image
-            test_img, test_gt = test_img.squeeze(dim=1).cpu().numpy(), test_gt.squeeze(dim=1).cpu().numpy()
-            y_hat_npy = y_hat.cpu().numpy()
-
-            # plot images on wandb
-            fig, axs = plt.subplots(5, 6, figsize=(10, 10))
-            fig.suptitle('Original --> Ground Truth --> Pred. (class 1) --> Pred. (class 2) --> Pred. (class 3) --> Pred Class 1 w/ Mask layover')
-            for i in range(5):
-                img_num = np.random.randint(0, self.cfg.batch_size)
-                axs[i, 0].imshow(test_img[img_num], cmap='gray'); axs[i, 0].axis('off') 
-                axs[i, 1].imshow(test_gt[img_num], cmap='gray'); axs[i, 1].axis('off')    
-
-                axs[i, 2].imshow(y_hat_npy[img_num, 1, :, :], cmap='gray'); axs[i, 2].axis('off')   # class 1
-                axs[i, 3].imshow(y_hat_npy[img_num, 2, :, :], cmap='gray'); axs[i, 3].axis('off')   # class 2
-                axs[i, 4].imshow(y_hat_npy[img_num, 3, :, :], cmap='gray'); axs[i, 4].axis('off')   # class 3                             
-
-                axs[i, 5].imshow((test_img[img_num] - y_hat_npy[img_num, 1, :, :]), cmap='gray'); axs[i, 5].axis('off')
-            fig.show()
-            wandb.log({"Output Visualizations": fig})
-        
-        return {'test_dice_score' : test_dice_score}
-'''
     def configure_optimizers(self):
         optimizer = optim.Adam(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, eta_min=1e-5)
@@ -140,15 +110,10 @@ class EncoderPretrain(pl.LightningModule):
     def train_dataloader(self):
         data = DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,
                              shuffle = True, drop_last=True, num_workers=self.cfg.num_workers)
-        print(f'DATA SET SIZE {data.size()}')
         return data
 
     def val_dataloader(self):
         return DataLoader(self.valid_dataset, batch_size = self.cfg.batch_size,
-                             shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
-    
-    def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
                              shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
 
 def main(cfg):
@@ -186,10 +151,8 @@ def main(cfg):
     wandb_logger.watch(model, log='all')
     
     trainer.fit(model)
-    print("------- Training Done! -------")
+    print("------- PreTraining Done! -------")
 
-    print("------- Testing Begins! -------")
-    trainer.test(model)
 
 if __name__ == '__main__':
     main(cfg)
