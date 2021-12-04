@@ -109,7 +109,7 @@ class Loss:
                 pairs = torch.zeros(1, 2, c)
                 pairs[1, 1, :] = aug1[i, :]
                 pairs[1, 2, :] = aug2[i, :]
-                aug_type[n, :] = torch.tensor([1., 2.])
+                aug_type[i, :] = torch.tensor([1., 2.])
                 pos[i, :, :] = pairs
 
             # loss type Gd- uses aug1 and aug2 and noaug
