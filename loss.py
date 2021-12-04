@@ -80,112 +80,140 @@ class Loss:
         else:
             return 1.0 - torch.mean(dices)
 
+    # cosine similarity
     def cos_sim(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
         vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), -1, -2)
         return torch.matmul(vect1_norm, vect2_norm)
 
-    def create_pos_set(self, latent_mini_batch):
-        # based on being passed output of g1(e())
-        # image 3*n-3 is unaugmented, 3*n-2 is augmentation 1 and 3*n is augmentation 3*n-1
-        # array augmentation_type contains on entry per sample specifying the augmentation type: 0=none, 1=type1, 2 = type2
-        n, c = latent_mini_batch.shape
 
-        if self.loss_type == 1:
+    # array aug_types contains on entry per sample specifying the augmentation type: 0=none, 1=aug1, 2 = aug2
+    def create_pos_set(self, aug1, aug2, unaug):
+        n = aug1.size(dim=0)
+        c = aug1.size(dim=1)
+
+        if self.encoder_strategy == 1:
+           pos = torch.zeros(n, 2, c)
+           aug_type = torch.zeros(n, 2)
+        if self.encoder_strategy == 2:
+            pos = torch.zeros(int(n*3), 2, c)
+            aug_type = torch.zeros(int(n*3), 2)
+        if self.encoder_strategy == 3:
+            pos = torch.zeros(int(n*4), 2, c)
+            aug_type = torch.zeros(int(n*4), 2)
+
+
+        for i in range(n):
+            # loss type Gr only uses aug1 and aug2, using notation from the paper: pos pairs are (x_i_bar, x_i_hat)
             if self.encoder_strategy == 1:
-                pos = torch.zeros(int(n/3), 2, c)
-                augmentation_type = torch.zeros(int(n/3), 2)
+                pairs = torch.zeros(1, 2, c)
+                pairs[1, 1, :] = aug1[i, :]
+                pairs[1, 2, :] = aug2[i, :]
+                aug_type[n, :] = torch.tensor([1., 2.])
+                pos[i, :, :] = pairs
+
+            # loss type Gd- uses aug1 and aug2 and noaug
+            # using notation from the paper: pos pairs are (x_i_bar, x_i_hat), (x_i, x_i_hat), (x_i, x_i_bar)
+            # adds each of the 3 pos pairs at each iteration
             if self.encoder_strategy == 2:
-                pos = torch.zeros(n, 2, c)
-                augmentation_type = torch.zeros(n, 2)
+                pairs = torch.zeros(3, 2, 128)
+                pairs[1, 1, :] = aug1[i, :]
+                pairs[1, 2, :] = aug2[i, :]
+                aug_type[int(i*3), :] = torch.tensor([1., 2.])
+                pairs[2, 1, :] = unaug[i, :]
+                pairs[2, 2, :] = aug1[i, :]
+                aug_type[int(i*3) + 1., :] = torch.tensor([0., 1.])
+                pairs[3, 1, :] = unaug[i, :]
+                pairs[3, 2, :] = aug2[i, :]
+                aug_type[int(i*3) + 2., :] = torch.tensor([0., 2.])
+                pos[int(i*3):int(i*3) + 3., :, :] = pairs
+
+            # loss type Gd uses aug1 and aug2 and noaug
+            # using notation from the paper: pos pairs are (x_i_bar, x_i_hat), (x_i, x_i_hat), (x_i, x_i_bar), (x_i, x_j)
+            # x_i, x_i_hat and x_i_bar are all from the same source image, x_j is a different source image from the same partition as x_i
             if self.encoder_strategy == 3:
-                pos = torch.zeros((int(n/3)*4), 2, c)
-                augmentation_type = torch.zeros(int((n/3)*4), 2)
+                # TODO: figure out how to get 2nd image for pos pairs (need partition info)
+                pairs = torch.zeros(4, 2, c)
 
-            for i in range(1, int((n+3)/3)):
-                if self.encoder_strategy == 1:
-                    pairs = torch.zeros(1, 2, 128)
-                    pairs[1, 1, :] = latent_mini_batch[(n * 3) - 2, :]
-                    pairs[1, 2, :] = latent_mini_batch[(n * 3) - 1, :]
-                    augmentation_type[n, :] = torch.tensor([1., 2.])
-                    pos[n, :, :] = pairs
+        # returns tensor of positive sets and a tensor indicating the augmentation type of each image
+        return pos, aug_type
 
-                if self.encoder_strategy == 2:
-                    pairs = torch.zeros(3, 2, 128)
-                    pairs[1, 1, :] = latent_mini_batch[(n * 3) - 2, :]
-                    pairs[1, 2, :] = latent_mini_batch[(n * 3) - 1, :]
-                    augmentation_type[n, :] = torch.tensor([1., 2.])
-                    pairs[2, 1, :] = latent_mini_batch[(n * 3) - 3, :]
-                    pairs[2, 2, :] = latent_mini_batch[(n * 3) - 2, :]
-                    augmentation_type[n, :] = torch.tensor([0., 1.])
-                    pairs[3, 1, :] = latent_mini_batch[(n * 3) - 3, :]
-                    pairs[3, 2, :] = latent_mini_batch[(n * 3) - 1, :]
-                    augmentation_type[n, :] = torch.tensor([0., 2.])
-
-                    pos[n, :, :] = pairs
-                if self.encoder_strategy == 3:
-                    # TODO: figure out how to get 2nd image for pos pairs (need partition info)
-                    pairs = torch.zeros(4, 2, 128)
-
-        if self.loss_type == 2:
+    def create_neg_set(self, arr, pos_set_idx):
+        n = arr.size(dim=0)
+        c = arr.size(dim=1)
+        neg = torch.zeros(n-1, c)
+        
+        # returns a tensor with the pos image removed
+        if self.encoder_strategy == 1:
+            for i in range(n):
+                if i == pos_set_idx:
+                    pass
+                else:
+                    neg[i, :] = arr[i, :]
+        else:
+            # TODO: implement neg pair sorting, need partition info
             pass
-
-        return pos, augmentation_type
-
-    def create_neg_set(self, latent_mini_batch, pos_set_idx, augmentation_type):
-        n, c = latent_mini_batch.shape
-        neg = torch.zeros(int((n / 3) - 1), c)
-
-        for i in range(1, int((n + 3) / 3)):
-            if i == pos_set_idx:
-                pass
-            else:
-                if augmentation_type == 0:
-                    neg[i, :] = latent_mini_batch[(n * 3) - 3, :]
-                if augmentation_type == 1:
-                    neg[i, :] = latent_mini_batch[(n * 3) - 2, :]
-                if augmentation_type == 2:
-                    neg[i, :] = latent_mini_batch[(n * 3) - 1, :]
+                
         return neg
 
+    # implementation of eq 1 from the paper
     def individual_global_loss(self, latent1, latent2, neg_set):
-        n, c = neg_set.shape
+        n = neg_set.size(0)
+        # numerator term in eq 1
         num = torch.exp(self.cos_sim(latent1, latent2) / self.tau)
+        # denominator term in eq 1
         denom = 0
         for i in range(n):
             denom += torch.exp(self.cos_sim(latent1, neg_set[i, :]))
         denom += num
+        # return eq 1
         return -torch.log(torch.div(num, denom))
 
-    def global_loss(self, prediction):
-        n, _ = prediction.shape
+    # implementation of eq 2 from the paper
+    def global_loss(self, aug1, aug2, unaug):
         loss = 0
-        pos_set, augmentations = self.create_pos_set(prediction)
-        m, _, _ = pos_set.shape
-        for i in range(m):
-            neg_set = self.create_neg_set(prediction, i, augmentations[i, 0])
-            l1 = self.individual_global_loss(pos_set[i, 1, :], pos_set[i, 2, :], neg_set)
-            neg_set = self.create_neg_set(prediction, i, augmentations[i, 1])
-            l2 = self.individual_global_loss(pos_set[i, 2, :], pos_set[i, 1, :], neg_set)
-            loss += l1+l2
+        pos_set, aug_type = self.create_pos_set(aug1, aug2, unaug)
+        n = pos_set.size(dim=0)
+        # loop through all images in the pos set
+        for i in range(n):
+            if aug_type[i, 0] == 0:
+                neg_set1 = self.create_neg_set(unaug, i)
+            if aug_type[i, 0] == 1:
+                neg_set1 = self.create_neg_set(aug1, i)
+            if aug_type[i, 0] == 2:
+                neg_set1 = self.create_neg_set(aug2, i)
+            
+            # pass pos_im1, pos_im2 and neg set to individual loss function<-- image order matters!
+            l1 = self.individual_global_loss(pos_set[i, 1, :], pos_set[i, 2, :], neg_set1)
+            
+            if aug_type[i, 1] == 0:
+                neg_set2 = self.create_neg_set(unaug, i)
+            if aug_type[i, 1] == 1:
+                neg_set2 = self.create_neg_set(aug1, i)
+            if aug_type[i, 1] == 2:
+                neg_set2 = self.create_neg_set(aug2, i)
+            
+            # pass pos_im2, pos_im1 and neg set to individual loss function <-- image order matters!
+            l2 = self.individual_global_loss(pos_set[i, 2, :], pos_set[i, 1, :], neg_set2)
+            
+            loss += l1 + l2
 
-        return loss / m
+        return loss / n
 
+    # this should be the only function you ever call, everything else is called as a chain reaction from here depending 
+    # on the Loss object you created, loss type 0 is dice, loss type 1 is global
+    def compute(self, aug1, aug2=None, unaug=None, target=None, multiclass=False):
+        aug1 = aug1.to(self.device)
+        if aug2:
+            aug2 = aug2.to(self.device)
+        if unaug:
+            unaug = unaug.to(self.device)
 
-    def local_loss(self, prediction):
-        # TODO: local loss implementation (L_l)
-        pass
-
-    def compute(self, prediction, target=None, multiclass=False):
         if self.loss_type == 0:
-            prediction = prediction.to(self.device)
             target = target.to(self.device)
-            return self.dice_loss_v2(prediction, target, multiclass)    # the new, "working" dice loss
-            # return self.dice_loss(prediction, target, multiclass)     # original, incorrect one
+            return self.dice_loss_v2(aug1, target, multiclass)    # the new, "working" dice loss
         if self.loss_type == 1:
-            return self.global_loss(prediction)
-        elif self.loss_type == 2:
-            return self.local_loss(prediction)
+            return self.global_loss(aug1, aug2, unaug)
 
 
 # testing with random inputs
