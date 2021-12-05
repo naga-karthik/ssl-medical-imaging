@@ -87,11 +87,13 @@ class Loss:
         return torch.matmul(vect1_norm, vect2_norm)
 
 
-    # array aug_types contains on entry per sample specifying the augmentation type: 0=none, 1=aug1, 2 = aug2
+    
     def create_pos_set(self, aug1, aug2, unaug):
         n = aug1.size(dim=0)
         c = aug1.size(dim=1)
-        
+
+        # array pos contains all positive pairs for each strategy.  
+        # array aug_types contains the augmentation type of each positive pair: 0=none, 1=aug1, 2 = aug2
         if self.encoder_strategy == 1:
            pos = torch.zeros(n, 2, c)
            aug_type = torch.zeros(n, 2)
@@ -105,6 +107,7 @@ class Loss:
 
         for i in range(n):
             # loss type Gr only uses aug1 and aug2, using notation from the paper: pos pairs are (x_i_bar, x_i_hat)
+            # where the "i" indicates the augmented images come from the same original image "x_i"
             if self.encoder_strategy == 1:
                 pairs = torch.zeros(1, 2, c)
                 pairs[0, 0, :] = aug1[i, :]
@@ -134,16 +137,24 @@ class Loss:
             if self.encoder_strategy == 3:
                 # TODO: figure out how to get 2nd image for pos pairs (need partition info)
                 pairs = torch.zeros(4, 2, c)
-
+        
         # returns tensor of positive sets and a tensor indicating the augmentation type of each image
         return pos, aug_type
 
-    def create_neg_set(self, arr, pos_set_idx):
-        n = arr.size(dim=0)
-        c = arr.size(dim=1)
-        neg = torch.zeros(n-1, c)
+    # create negative set consisting of images that are dissimilar to x_i and its transformed versions.
+    # This set may include all images other than x_i, including their possible transformations.
+    def create_neg_set(self, aug1, aug2, unaug, pos_set_idx):
+        n = aug1.size(dim=0)
+        c = aug1.size(dim=1)
+
+        if self.encoder_strategy == 1:
+            neg = torch.zeros(int((2*n)-2), c)
+        if self.encoder_strategy == 2:
+            neg = torch.zeros(int((3*n)-3), c) # wrong initialization needs update to remove any images from that same partition as well
+        if self.encoder_strategy == 3:
+            neg = torch.zeros(int((4*n)-4), c) # wrong initialization needs update to remove any images from that same partition as well
         
-        # returns a tensor with the pos image removed
+        # returns a tensor with x_i and any augmentations of x_i removed
         if self.encoder_strategy == 1:
             skip = False # flag to modify idx after skip
             for i in range(n):
@@ -154,11 +165,12 @@ class Loss:
                         j = i - 1
                     else:
                         j = i
-                    neg[j, :] = arr[j, :]
+                    neg[int(2*j), :] = aug1[j, :]
+                    neg[int((2*j)+1), :] = aug2[j, :]
         else:
             # TODO: implement neg pair sorting, need partition info
             pass
-                
+        # TODO: maybe figure out how to shuffle neg before returning?        
         return neg
 
     # implementation of eq 1 from the paper
@@ -179,27 +191,16 @@ class Loss:
         loss = 0
         pos_set, aug_type = self.create_pos_set(aug1, aug2, unaug)
         n = pos_set.size(dim=0)
+        
         # loop through all images in the pos set
         for i in range(n):
-            if aug_type[i, 0] == 0:
-                neg_set1 = self.create_neg_set(unaug, i)
-            if aug_type[i, 0] == 1:
-                neg_set1 = self.create_neg_set(aug1, i)
-            if aug_type[i, 0] == 2:
-                neg_set1 = self.create_neg_set(aug2, i)
+            # create neg set for the current pos set
+            neg_set = self.create_neg_set(aug1, aug2, unaug, i)
             
             # pass pos_im1, pos_im2 and neg set to individual loss function<-- image order matters!
-            l1 = self.individual_global_loss(pos_set[i, 0, :], pos_set[i, 1, :], neg_set1)
-            
-            if aug_type[i, 1] == 0:
-                neg_set2 = self.create_neg_set(unaug, i)
-            if aug_type[i, 1] == 1:
-                neg_set2 = self.create_neg_set(aug1, i)
-            if aug_type[i, 1] == 2:
-                neg_set2 = self.create_neg_set(aug2, i)
-            
+            l1 = self.individual_global_loss(pos_set[i, 0, :], pos_set[i, 1, :], neg_set)
             # pass pos_im2, pos_im1 and neg set to individual loss function <-- image order matters!
-            l2 = self.individual_global_loss(pos_set[i, 0, :], pos_set[i, 1, :], neg_set2)
+            l2 = self.individual_global_loss(pos_set[i, 1, :], pos_set[i, 0, :], neg_set)
             
             loss += l1 + l2
 

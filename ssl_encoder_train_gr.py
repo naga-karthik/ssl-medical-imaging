@@ -4,8 +4,8 @@ import time
 import os
 
 # uncomment for local run
-#os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
-#os.environ["WANDB_API_KEY"] = "c2afd1f40f749fb27430c7ed36a6f3f2d425e6dc"
+# os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+# os.environ["WANDB_API_KEY"] = "c2afd1f40f749fb27430c7ed36a6f3f2d425e6dc"
 
 timestamp = time.time()
 
@@ -21,8 +21,7 @@ from Dataset.dataset import DatasetGR
 from Dataset.experiments_paper import data_init_acdc
 from loss import Loss
 
-#img_path = "ACDC" # for local run
-img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
+img_path = "ACDC" # for local run
 seg_path = None
 
 parser = argparse.ArgumentParser(description="gl-GR-Random Strategy Run 1")
