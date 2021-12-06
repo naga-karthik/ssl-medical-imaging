@@ -77,6 +77,47 @@ class Loss:
 
         return 1.0 - torch.mean(dices)
 
+    def contrastive_loss_simclr(self, proj_feat1, proj_feat2, temperature=0.5):
+        """
+        Adapted from: 
+        https://github.com/colleenjg/neuromatch_ssl_tutorial/blob/130380eb77e46a993489d7c6c89d0c9ee8ce3ed3/modules/models.py#L358
+        Returns contrastive loss, given sets of projected features, with positive pairs matched along the batch dimension.
+        Required args:
+            - proj_feat1 (2D torch Tensor): first set of projected features (batch_size x feat_size)
+            - proj_feat2 (2D torch Tensor): second set of projected features (batch_size x feat_size)
+        Optional args:
+            - temperature (float): relaxation temperature. (default: 0.5)
+        Returns:
+            - loss (float): mean contrastive loss
+        """
+        # Normalize the individual representations
+        batch_size = len(proj_feat1)
+        z1 = F.normalize(proj_feat1, dim=1)
+        z2 = F.normalize(proj_feat2, dim=1)
+
+        # (vertical) stack one on top of the other
+        representations = torch.cat([z1, z2], dim=0)  # shape: (2*batch-size) x g1_out_dimension
+
+        # get the full similarity matrix 
+        similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (2*batch-size) x (2*batch-size)
+
+        # initialize arrays to set the indices of the positive and negative samples (shape: (2*batch-size) x (2*batch-size))
+         # finds a positive sample (2*batch-size)//2 away from the original sample
+        pos_sample_indicators = torch.roll(torch.eye(2*batch_size), batch_size, 1).to(proj_feat1.device)   
+        neg_sample_indicators = (torch.ones(2*batch_size) - torch.eye(2*batch_size)).to(proj_feat1.device)
+
+        # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
+        numerator = torch.exp(similarity_matrix/temperature)[pos_sample_indicators.bool()]
+        # calculate the denominator by summing over each pair except for the diagonal elements
+        denominator = torch.sum((torch.exp(similarity_matrix/temperature)*neg_sample_indicators), dim=1)
+
+        # clamp to avoid division by zero
+        if (denominator < 1e-8).any():
+            denominator = torch.clamp(denominator, 1e-8)
+
+        loss = torch.mean(-torch.log(numerator/denominator))
+        return loss
+
     def cos_sim(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
         vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), -1, -2)
@@ -173,14 +214,15 @@ class Loss:
         # TODO: local loss implementation (L_l)
         pass
 
-    def compute(self, prediction, target=None, multiclass=False):
+    def compute(self, proj_feat1, proj_feat2, prediction, target=None, multiclass=False):
         if self.loss_type == 0:
             prediction = prediction.to(self.device)
             target = target.to(self.device)
             return self.dice_loss_v2(prediction, target, multiclass)    # the new, "working" dice loss
             # return self.dice_loss(prediction, target, multiclass)     # original, incorrect one
         if self.loss_type == 1:
-            return self.global_loss(prediction)
+            # return self.global_loss(prediction)
+            return self.contrastive_loss_simclr(proj_feat1, proj_feat2)
         elif self.loss_type == 2:
             return self.local_loss(prediction)
 
