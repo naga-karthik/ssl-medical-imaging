@@ -81,14 +81,24 @@ class Loss:
             return 1.0 - torch.mean(dices)
 
     # cosine similarity
-    def cos_sim(self, vect1, vect2):
+    def cos_sim1(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
         vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), 0, -1)
-        return torch.matmul(vect1_norm, vect2_norm)
-
+        return torch.log(torch.matmul(vect1_norm, vect2_norm)) / 0.1  # scale factor 0.1 applied in online repo
+    
+    def cos_sim(self, all_latents):
+        r = all_latents.size(dim=0)
+        sim_arr = torch.zeros(r, r)
+        for i in range(r):
+            for j in range(r):
+                x = self.cos_sim1(all_latents[i, :], all_latents[j, :]) # using our original cos similarity for 2 latents to compute the entire matrix of cos similarities
+                print(f'vecti: {all_latents[i, :10]} vectj: {all_latents[j, :10]}, x: {x}')
+                
+                sim_arr[i, j] = x
+        return sim_arr
 
     
-    def create_pos_set(self, aug1, aug2, unaug):
+    '''def create_pos_set(self, aug1, aug2, unaug):
         n = aug1.size(dim=0)
         c = aug1.size(dim=1)
 
@@ -171,10 +181,10 @@ class Loss:
             # TODO: implement neg pair sorting, need partition info
             pass
         # TODO: maybe figure out how to shuffle neg before returning?        
-        return neg
+        return neg'''
 
     # implementation of eq 1 from the paper
-    def individual_global_loss(self, latent1, latent2, neg_set):
+    '''def individual_global_loss(self, latent1, latent2, neg_set):
         n = neg_set.size(0)
         # numerator term in eq 1
         num = torch.exp(self.cos_sim(latent1, latent2) / self.tau)
@@ -184,10 +194,30 @@ class Loss:
             denom += torch.exp(self.cos_sim(latent1, neg_set[i, :]))
         denom += num
         # return eq 1
-        return -torch.log(torch.div(num, denom))
+        return -torch.log(torch.div(num, denom))'''
+
+    def individual_global_loss(self, latent1_idx, latent2_idx, cos_sim_arr):
+        c = cos_sim_arr.size(dim=1) # num cols
+        # numerator term in eq 1
+        num = torch.exp(cos_sim_arr[latent1_idx, latent2_idx] / self.tau)
+
+        # get all cols in row latent1_idx except for col latent1_idx
+        col_booleans = torch.ones(c, dtype=torch.bool)
+        col_booleans[latent1_idx] = False
+        # cos sims to sum for denominator
+        denom_terms = cos_sim_arr[latent1_idx, col_booleans]
+        #print(cos_sim_arr[latent1_idx, :], cos_sim_arr[latent1_idx, col_booleans])
+        # denominator term in eq 1
+        denom = torch.sum(
+            torch.exp(denom_terms / self.tau)
+        )
+        loss = -torch.log(torch.div(num, denom))
+        #print(f'NUM: {num}, DENOM: {denom}, LOSS: {loss}')
+
+        return loss.squeeze(0)
 
     # implementation of eq 2 from the paper
-    def global_loss(self, aug1, aug2, unaug):
+    '''def global_loss(self, aug1, aug2, unaug):
         loss = 0
         pos_set, aug_type = self.create_pos_set(aug1, aug2, unaug)
         n = pos_set.size(dim=0)
@@ -204,45 +234,37 @@ class Loss:
             
             loss += l1 + l2
 
-        return loss / n
+        return loss / n'''
+
+    def global_loss(self, aug1, aug2, unaug):
+        loss = 0
+        n = aug1.size(dim=0)
+
+        # combine latents from each array into 1
+        combine = torch.cat((aug1, aug2), dim=0) # gives a 2*n x 128 arr of the stacked latents
+
+        # calculate cos similarity between each image pair
+        cos_sim_arr = self.cos_sim(combine)
+        print(cos_sim_arr)
+
+        for i in range(n):
+            latent1_idx = int(i)
+            latent2_idx = int(i + n)
+            loss += self.individual_global_loss(latent1_idx, latent2_idx, cos_sim_arr) + self.individual_global_loss(latent2_idx, latent1_idx, cos_sim_arr)
 
     # this should be the only function you ever call, everything else is called as a chain reaction from here depending 
     # on the Loss object you created, loss type 0 is dice, loss type 1 is global
     def compute(self, aug1, aug2=None, unaug=None, target=None, multiclass=False):
         aug1 = aug1.to(self.device)
+        aug1 = F.normalize(aug1, dim=1) # normalize latents
         if aug2 != None:
             aug2 = aug2.to(self.device)
+            aug2 = F.normalize(aug2, dim=1) # normalize latents
         if unaug != None:
             unaug = unaug.to(self.device)
+            unaug = F.normalize(unaug, dim=1)  # normalize latents
         if self.loss_type == 0:
             target = target.to(self.device)
             return self.dice_loss_v2(aug1, target, multiclass)    # the new, "working" dice loss
         if self.loss_type == 1:
             return self.global_loss(aug1, aug2, unaug)
-
-
-# testing with random inputs
-if __name__ == "__main__":
-    num_classes = 4
-    loss = Loss()
-    pred = torch.randn(8, num_classes, 192, 192)
-    pred_softmax = F.softmax(pred, dim=1)
-
-    target = torch.randint(low=0, high=4, size=(8, 1, 192, 192))
-    print(f"unique output: {torch.unique(target)}")
-    target_one_hot = loss.one_hot(target.long(), num_classes=num_classes)
-    print(target_one_hot.shape)
-
-    dice_loss = loss.compute(pred_softmax, target_one_hot, multiclass=True)
-    print(f"dice loss: {dice_loss}")
-
-    # in_channels = 1
-    # num_filters = [1, 16, 32, 64, 128, 128]
-    # fc_units = [3200, 1024]
-    # g1_out_dim = 128
-    # num_classes = 3
-
-    # full_model = seg_models.SegUnetFullModel(in_channels, num_filters,fc_units, g1_out_dim, num_classes)
-    # logits, output = full_model(torch.randn(8, 1, 192, 192))
-    # print(logits.shape)
-    # print(f"output shape: {output.shape}")
