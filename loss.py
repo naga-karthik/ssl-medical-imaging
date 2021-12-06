@@ -84,7 +84,7 @@ class Loss:
     def cos_sim1(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
         vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), 0, -1)
-        return torch.log(torch.matmul(vect1_norm, vect2_norm)) / 0.1  # scale factor 0.1 applied in online repo
+        return torch.log(torch.matmul(vect1_norm, vect2_norm))
     
     def cos_sim(self, all_latents):
         r = all_latents.size(dim=0)
@@ -94,105 +94,6 @@ class Loss:
                 x = self.cos_sim1(all_latents[i, :], all_latents[j, :]) # using our original cos similarity for 2 latents to compute the entire matrix of cos similarities                
                 sim_arr[i, j] = x
         return sim_arr
-
-    
-    '''def create_pos_set(self, aug1, aug2, unaug):
-        n = aug1.size(dim=0)
-        c = aug1.size(dim=1)
-
-        # array pos contains all positive pairs for each strategy.  
-        # array aug_types contains the augmentation type of each positive pair: 0=none, 1=aug1, 2 = aug2
-        if self.encoder_strategy == 1:
-           pos = torch.zeros(n, 2, c)
-           aug_type = torch.zeros(n, 2)
-        if self.encoder_strategy == 2:
-            pos = torch.zeros(int(n*3), 2, c)
-            aug_type = torch.zeros(int(n*3), 2)
-        if self.encoder_strategy == 3:
-            pos = torch.zeros(int(n*4), 2, c)
-            aug_type = torch.zeros(int(n*4), 2)
-
-
-        for i in range(n):
-            # loss type Gr only uses aug1 and aug2, using notation from the paper: pos pairs are (x_i_bar, x_i_hat)
-            # where the "i" indicates the augmented images come from the same original image "x_i"
-            if self.encoder_strategy == 1:
-                pairs = torch.zeros(1, 2, c)
-                pairs[0, 0, :] = aug1[i, :]
-                pairs[0, 1, :] = aug2[i, :]
-                aug_type[i, :] = torch.tensor([1., 2.])
-                pos[i, :, :] = pairs
-
-            # loss type Gd- uses aug1 and aug2 and noaug
-            # using notation from the paper: pos pairs are (x_i_bar, x_i_hat), (x_i, x_i_hat), (x_i, x_i_bar)
-            # adds each of the 3 pos pairs at each iteration
-            if self.encoder_strategy == 2:
-                pairs = torch.zeros(3, 2, 128)
-                pairs[1, 1, :] = aug1[i, :]
-                pairs[1, 2, :] = aug2[i, :]
-                aug_type[int(i*3), :] = torch.tensor([1., 2.])
-                pairs[2, 1, :] = unaug[i, :]
-                pairs[2, 2, :] = aug1[i, :]
-                aug_type[int(i*3) + 1., :] = torch.tensor([0., 1.])
-                pairs[3, 1, :] = unaug[i, :]
-                pairs[3, 2, :] = aug2[i, :]
-                aug_type[int(i*3) + 2., :] = torch.tensor([0., 2.])
-                pos[int(i*3):int(i*3) + 3., :, :] = pairs
-
-            # loss type Gd uses aug1 and aug2 and noaug
-            # using notation from the paper: pos pairs are (x_i_bar, x_i_hat), (x_i, x_i_hat), (x_i, x_i_bar), (x_i, x_j)
-            # x_i, x_i_hat and x_i_bar are all from the same source image, x_j is a different source image from the same partition as x_i
-            if self.encoder_strategy == 3:
-                # TODO: figure out how to get 2nd image for pos pairs (need partition info)
-                pairs = torch.zeros(4, 2, c)
-        
-        # returns tensor of positive sets and a tensor indicating the augmentation type of each image
-        return pos, aug_type
-
-    # create negative set consisting of images that are dissimilar to x_i and its transformed versions.
-    # This set may include all images other than x_i, including their possible transformations.
-    def create_neg_set(self, aug1, aug2, unaug, pos_set_idx):
-        n = aug1.size(dim=0)
-        c = aug1.size(dim=1)
-
-        if self.encoder_strategy == 1:
-            neg = torch.zeros(int((2*n)-2), c)
-        if self.encoder_strategy == 2:
-            neg = torch.zeros(int((3*n)-3), c) # wrong initialization needs update to remove any images from that same partition as well
-        if self.encoder_strategy == 3:
-            neg = torch.zeros(int((4*n)-4), c) # wrong initialization needs update to remove any images from that same partition as well
-        
-        # returns a tensor with x_i and any augmentations of x_i removed
-        if self.encoder_strategy == 1:
-            skip = False # flag to modify idx after skip
-            for i in range(n):
-                if i == pos_set_idx:
-                    skip = True
-                else:
-                    if skip:
-                        j = i - 1
-                    else:
-                        j = i
-                    neg[int(2*j), :] = aug1[j, :]
-                    neg[int((2*j)+1), :] = aug2[j, :]
-        else:
-            # TODO: implement neg pair sorting, need partition info
-            pass
-        # TODO: maybe figure out how to shuffle neg before returning?        
-        return neg'''
-
-    # implementation of eq 1 from the paper
-    '''def individual_global_loss(self, latent1, latent2, neg_set):
-        n = neg_set.size(0)
-        # numerator term in eq 1
-        num = torch.exp(self.cos_sim(latent1, latent2) / self.tau)
-        # denominator term in eq 1
-        denom = 0
-        for i in range(n):
-            denom += torch.exp(self.cos_sim(latent1, neg_set[i, :]))
-        denom += num
-        # return eq 1
-        return -torch.log(torch.div(num, denom))'''
 
     def individual_global_loss(self, latent1_idx, latent2_idx, cos_sim_arr):
         c = cos_sim_arr.size(dim=1) # num cols
@@ -213,28 +114,18 @@ class Loss:
         return loss
 
     # implementation of eq 2 from the paper
-    '''def global_loss(self, aug1, aug2, unaug):
-        loss = 0
-        pos_set, aug_type = self.create_pos_set(aug1, aug2, unaug)
-        n = pos_set.size(dim=0)
-        
-        # loop through all images in the pos set
-        for i in range(n):
-            # create neg set for the current pos set
-            neg_set = self.create_neg_set(aug1, aug2, unaug, i)
-            
-            # pass pos_im1, pos_im2 and neg set to individual loss function<-- image order matters!
-            l1 = self.individual_global_loss(pos_set[i, 0, :], pos_set[i, 1, :], neg_set)
-            # pass pos_im2, pos_im1 and neg set to individual loss function <-- image order matters!
-            l2 = self.individual_global_loss(pos_set[i, 1, :], pos_set[i, 0, :], neg_set)
-            
-            loss += l1 + l2
-
-        return loss / n'''
 
     def global_loss(self, aug1, aug2, unaug):
         loss = 0
         n = aug1.size(dim=0)
+
+        # set the number of positive pairs for each strategy
+        if self.encoder_strategy == 1:
+            num_pos = n
+        if self.encoder_strategy == 2:
+            num_pos = n * 3
+        if self.encoder_strategy == 3:
+            num_pos = n * 4
 
         # combine latents from each array into 1
         combine = torch.cat((aug1, aug2), dim=0) # gives a 2*n x 128 arr of the stacked latents
@@ -247,7 +138,8 @@ class Loss:
             latent2_idx = int(i + n)
             loss += self.individual_global_loss(latent1_idx, latent2_idx, cos_sim_arr) + self.individual_global_loss(latent2_idx, latent1_idx, cos_sim_arr)
         
-        return loss
+        print(f'LOSS FINAL: {loss / num_pos}')
+        return loss / num_pos
         
     # this should be the only function you ever call, everything else is called as a chain reaction from here depending 
     # on the Loss object you created, loss type 0 is dice, loss type 1 is global
