@@ -24,9 +24,9 @@ import torchvision.transforms as transforms
 # dataloaders and segmentation models
 from seg_models import SegUnetFullModel, SegUnetEncoder_and_ProjectorG1, SegUnetDecoder
 from seg_models_v2 import UNet
-from Dataloader.init_data import acdc, md_prostate
-from Dataloader.dataloader import DataloaderRandom
-from Dataloader.experiments_paper import data_init_acdc, data_init_prostate_md
+from Dataset.init_data import acdc, md_prostate
+from Dataset.dataset import DataloaderRandom
+from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
