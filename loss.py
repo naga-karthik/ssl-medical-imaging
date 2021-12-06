@@ -91,9 +91,7 @@ class Loss:
         sim_arr = torch.zeros(r, r)
         for i in range(r):
             for j in range(r):
-                x = self.cos_sim1(all_latents[i, :], all_latents[j, :]) # using our original cos similarity for 2 latents to compute the entire matrix of cos similarities
-                print(f'vecti: {all_latents[i, :10]} vectj: {all_latents[j, :10]}, x: {x}')
-                
+                x = self.cos_sim1(all_latents[i, :], all_latents[j, :]) # using our original cos similarity for 2 latents to compute the entire matrix of cos similarities                
                 sim_arr[i, j] = x
         return sim_arr
 
@@ -206,15 +204,13 @@ class Loss:
         col_booleans[latent1_idx] = False
         # cos sims to sum for denominator
         denom_terms = cos_sim_arr[latent1_idx, col_booleans]
-        #print(cos_sim_arr[latent1_idx, :], cos_sim_arr[latent1_idx, col_booleans])
         # denominator term in eq 1
         denom = torch.sum(
             torch.exp(denom_terms / self.tau)
         )
         loss = -torch.log(torch.div(num, denom))
-        #print(f'NUM: {num}, DENOM: {denom}, LOSS: {loss}')
 
-        return loss.squeeze(0)
+        return loss
 
     # implementation of eq 2 from the paper
     '''def global_loss(self, aug1, aug2, unaug):
@@ -245,24 +241,22 @@ class Loss:
 
         # calculate cos similarity between each image pair
         cos_sim_arr = self.cos_sim(combine)
-        print(cos_sim_arr)
 
         for i in range(n):
             latent1_idx = int(i)
             latent2_idx = int(i + n)
             loss += self.individual_global_loss(latent1_idx, latent2_idx, cos_sim_arr) + self.individual_global_loss(latent2_idx, latent1_idx, cos_sim_arr)
-
+        
+        return loss
+        
     # this should be the only function you ever call, everything else is called as a chain reaction from here depending 
     # on the Loss object you created, loss type 0 is dice, loss type 1 is global
     def compute(self, aug1, aug2=None, unaug=None, target=None, multiclass=False):
         aug1 = aug1.to(self.device)
-        aug1 = F.normalize(aug1, dim=1) # normalize latents
         if aug2 != None:
             aug2 = aug2.to(self.device)
-            aug2 = F.normalize(aug2, dim=1) # normalize latents
         if unaug != None:
             unaug = unaug.to(self.device)
-            unaug = F.normalize(unaug, dim=1)  # normalize latents
         if self.loss_type == 0:
             target = target.to(self.device)
             return self.dice_loss_v2(aug1, target, multiclass)    # the new, "working" dice loss
