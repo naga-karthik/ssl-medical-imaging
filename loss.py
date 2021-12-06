@@ -80,18 +80,20 @@ class Loss:
         else:
             return 1.0 - torch.mean(dices)
 
-    # cosine similarity
-    def cos_sim1(self, vect1, vect2):
+    # old cosine similarity, the results were better using the pytorch version but I'm keeping it to troubleshoot
+    def cos_sim_old(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
         vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), 0, -1)
-        return torch.log(torch.matmul(vect1_norm, vect2_norm))
-    
+        return torch.matmul(vect1_norm, vect2_norm)
+
+    # cosine similarity using pytorch cosine similarity
     def cos_sim(self, all_latents):
         r = all_latents.size(dim=0)
         sim_arr = torch.zeros(r, r)
         for i in range(r):
             for j in range(r):
-                x = self.cos_sim1(all_latents[i, :], all_latents[j, :]) # using our original cos similarity for 2 latents to compute the entire matrix of cos similarities                
+                #x = self.cos_sim1(all_latents[i, :], all_latents[j, :])
+                x = F.cosine_similarity(all_latents[i, :], all_latents[j, :], 0)
                 sim_arr[i, j] = x
         return sim_arr
 
@@ -138,7 +140,6 @@ class Loss:
             latent2_idx = int(i + n)
             loss += self.individual_global_loss(latent1_idx, latent2_idx, cos_sim_arr) + self.individual_global_loss(latent2_idx, latent1_idx, cos_sim_arr)
         
-        print(f'LOSS FINAL: {loss / num_pos}')
         return loss / num_pos
         
     # this should be the only function you ever call, everything else is called as a chain reaction from here depending 
