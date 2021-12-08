@@ -40,10 +40,10 @@ img_path = "ACDC"
 seg_path = "ACDC"
 load_path = "./pretrained_encoder.pt"
 
-parser = argparse.ArgumentParser(description="gl-Gr-Random-finetune")
+parser = argparse.ArgumentParser(description="gl-Gr-Random-finetune Run 2")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='gl-GR-R_Finetune-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='gl-GR-R_Finetune-tr8-new', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-partition', '--partition', default=4, help='Specifyg number of partitions')
@@ -55,8 +55,8 @@ parser.add_argument('--img_path', default=img_path, type=str, help='Absolute pat
 parser.add_argument('--seg_path', default=seg_path, type=str, help='Same as path of training data')
 # model
 parser.add_argument('-in_ch', '--in_channels', default=1, type=int, help='Number of input channels')
-parser.add_argument('-num_flt', '--init_filters', type=int, default=16, help='Initial no. of filters for Conv Layers')
-parser.add_argument('-num_flt_enc', '--encoder_init_filters', type=int, default=16,
+parser.add_argument('-num_flt', '--init_filters', type=int, default=32, help='Initial no. of filters for Conv Layers')
+parser.add_argument('-num_flt_enc', '--encoder_init_filters', type=int, default=32,
                     help='Initial no. of filters for encoder')
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024],
                     help='List containing no. of units in FC layers')
@@ -64,7 +64,7 @@ parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
 parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
-parser.add_argument('-bs', '--batch_size', default=64, type=int, help='Batch size')
+parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
 parser.add_argument('-lr', '--learning_rate', default=1e-3, type=float, help="Learning rate to use")
