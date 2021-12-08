@@ -134,14 +134,45 @@ class UNetEncoder(nn.Module):
         self.down4 = Down(init_filters*8, init_filters*16 // factor)
 
     def forward(self, x):
+        context_features = []
         x1 = self.inc(x)
+        context_features.append(x1)
         x2 = self.down1(x1)
+        context_features.append(x2)
         x3 = self.down2(x2)
+        context_features.append(x3)
         x4 = self.down3(x3)
+        context_features.append(x4)
         x5 = self.down4(x4)
 
-        return x5
+        return x5, context_features
 
+# #############################################################################
+# ---------------------------- UNet Decoder Model -----------------------------
+# #############################################################################
+class UNetDecoder(nn.Module):
+    def __init__(self, init_filters, n_classes, bilinear=True):
+        super(UNetDecoder, self).__init__()
+        self.init_filters = init_filters
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+
+        factor = 2 if bilinear else 1
+        self.up1 = Up(init_filters * 16, init_filters * 8 // factor, bilinear)
+        self.up2 = Up(init_filters * 8, init_filters * 4 // factor, bilinear)
+        self.up3 = Up(init_filters * 4, init_filters * 2 // factor, bilinear)
+        self.up4 = Up(init_filters * 2, init_filters, bilinear)
+        self.outc = OutConv(init_filters, n_classes)
+
+    def forward(self, enc_out, context_features):
+        x1, x2, x3, x4 = context_features  # getting these from the encoder
+        x = self.up1(enc_out, x4)  # enc_out is x5 in the full UNet model
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+        logits = self.outc(x)
+        out_final = F.softmax(logits, dim=1)
+        return logits, out_final
 
 # #############################################################################
 # ---------------------------- G1 Projector Head -----------------------------
@@ -174,8 +205,11 @@ if __name__ == "__main__":
     # print(f"final output shape: {out_final.shape}")
 
     encoder_model = UNetEncoder(n_channels=1, init_filters=16)
-    enc_out = encoder_model(input)
+    enc_out, _ = encoder_model(input)
     print(f"enc out shape: {enc_out.shape}")
     proj_head = ProjectorHead(encoder_init_filters=16, out_dim=128)
     proj_out = proj_head(enc_out)
-    print(f"projector out shape: {proj_out.shape}")    
+    print(f"projector out shape: {proj_out.shape}")
+
+
+    

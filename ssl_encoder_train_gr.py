@@ -4,12 +4,13 @@ import time
 import os
 
 # uncomment for local run
-# os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
-# os.environ["WANDB_API_KEY"] = "c2afd1f40f749fb27430c7ed36a6f3f2d425e6dc"
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+os.environ["WANDB_API_KEY"] = "c2afd1f40f749fb27430c7ed36a6f3f2d425e6dc"
 
 timestamp = time.time()
 
 # machine learning packages
+import torch
 import torch.optim as optim
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -24,7 +25,7 @@ from loss import Loss
 img_path = "ACDC" # for local run
 seg_path = None
 
-parser = argparse.ArgumentParser(description="gl-GR-Random Strategy Run 1")
+parser = argparse.ArgumentParser(description="gl-GR-Random Strategy Run 2")
 
 # all the arguments for the dataset, model, and training hyperparameters
 parser.add_argument('--exp_name', default='gl-GR-R_Test-SSL', type=str, help='Name of the experiment/run')
@@ -37,14 +38,14 @@ parser.add_argument('--img_path', default=img_path, type=str, help='Absolute pat
 parser.add_argument('--seg_path', default=seg_path, type=str, help='Same as path of training data')
 # model
 parser.add_argument('-in_ch', '--in_channels', default=1, type=int, help='Number of input channels')
-parser.add_argument('-num_flt', '--init_filters', type=int, default=16, help='Initial no. of filters for Conv Layers')
-parser.add_argument('-num_flt_enc', '--encoder_init_filters', type=int, default=16, help='Initial no. of filters for encoder')
+parser.add_argument('-num_flt', '--init_filters', type=int, default=32, help='Initial no. of filters for Conv Layers')
+parser.add_argument('-num_flt_enc', '--encoder_init_filters', type=int, default=32, help='Initial no. of filters for encoder')
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024], help='List containing no. of units in FC layers')
 parser.add_argument('-g1_dim', '--out_dim', default=128, type=int, help='Output dimension for the projector head')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
 parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
-parser.add_argument('-bs', '--batch_size', default=64, type=int, help='Batch size')
+parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
 parser.add_argument('-lr', '--learning_rate', default=1e-3, type=float, help="Learning rate to use")
@@ -70,7 +71,7 @@ class EncoderPretrain(pl.LightningModule):
         self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
         
     def forward(self, x):
-        e_out = self.e(x)
+        e_out, _ = self.e(x)
         g1_out = self.g1(e_out)
         return g1_out
     
@@ -78,9 +79,9 @@ class EncoderPretrain(pl.LightningModule):
         train_aug1, train_aug2 = batch
         train_aug1, train_aug2 = train_aug1.float(), train_aug2.float()
 
-        encoder_out_aug1 = self.e(train_aug1)  # self(train_img)
+        encoder_out_aug1 = self.e(train_aug1)[0] # self(train_img)
         out_aug1 = self.g1(encoder_out_aug1)
-        encoder_out_aug2 = self.e(train_aug2)  # self(train_img)
+        encoder_out_aug2 = self.e(train_aug2)[0]  # self(train_img)
         out_aug2 = self.g1(encoder_out_aug2)
 
         # Gr loss
@@ -92,10 +93,10 @@ class EncoderPretrain(pl.LightningModule):
     def validation_step(self, batch, batch_nb):
         val_aug1, val_aug2 = batch
         val_aug1, val_aug2 = val_aug1.float(), val_aug2.float()
-
-        encoder_out_aug1 = self.e(val_aug1)  # self(train_img)
+        
+        encoder_out_aug1 = self.e(val_aug1)[0]  # self(train_img)
         out_aug1 = self.g1(encoder_out_aug1)
-        encoder_out_aug2 = self.e(val_aug2)  # self(train_img)
+        encoder_out_aug2 = self.e(val_aug2)[0]  # self(train_img)
         out_aug2 = self.g1(encoder_out_aug2)
 
         # Gr loss
@@ -145,7 +146,7 @@ def main(cfg):
 
     trainer = pl.Trainer(
         devices=cfg.num_gpus, accelerator="gpu", 
-        strategy="ddp",
+        #strategy="ddp",
         logger=wandb_logger,
         callbacks=[checkpoint, lr_monitor],
         max_epochs=cfg.epochs,
@@ -158,7 +159,8 @@ def main(cfg):
     
     trainer.fit(model)
     print("------- PreTraining Done! -------")
-
+    # load the best checkpoint after training
+    torch.save(model.state_dict(), 'pretrained_encoder.pt')
 
 if __name__ == '__main__':
     main(cfg)
