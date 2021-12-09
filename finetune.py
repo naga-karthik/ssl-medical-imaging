@@ -24,18 +24,20 @@ import torchvision.transforms as transforms
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, UNetDecoder
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DatasetRandom
+from Dataset.dataset import DatasetRandom       # note: for finetuning we always use DatasetRandom
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
-load_path = "./best_encoder_model.pt"
+# load paths for different pre-trained encoders (uncomment accordingly)
+# load_path = "./best_enc_model_GR.pt"    # for GR
+load_path = "./best_enc_model_GDminus.pt"    # for GD-
 
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='GR-R_Finetune-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='GDminus-R_Finetune-tr8', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-nti', '--num_train_imgs', default='tr8', type=str, help='Number of training images, options tr1, tr8 or tr52')
@@ -102,7 +104,7 @@ class SegModel(pl.LightningModule):
         # print(torch.unique(gts), gts.shape)
 
         gts_one_hot = self.loss.one_hot(gts, num_classes=self.cfg.num_classes)  # convert to one-hot for Dice loss
-        loss = self.loss.compute(proj_feat1=None, proj_feat2=None, prediction=preds, target=gts_one_hot, multiclass=True)
+        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, partition_size=None, prediction=preds, target=gts_one_hot, multiclass=True)
         return loss, preds, imgs, gts        
     
     def training_step(self, batch, batch_nb):
