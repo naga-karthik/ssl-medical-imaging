@@ -127,21 +127,21 @@ def test_dataloaderGR():
 
 
 def test_dataloaderGD():
-    no_of_tr_imgs = 'tr1'
+    no_of_tr_imgs = 'tr52'
     # change this to 'c1', 'c2', 'cr3', 'cr4', 'cr5'
     comb_of_tr_imgs = 'c1'
     # md_prostate
-    img_path = "../Task05_Prostate/images"
-    train_ids = Dataset.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
-    train_dataset = DatasetGD(md_prostate, train_ids, 4, img_path, preprocessed_data=True)
+    # img_path = "../Task05_Prostate/images"
+    # train_ids = Dataset.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
+    # train_dataset = DatasetGD(md_prostate, train_ids, 4, img_path, preprocessed_data=True)
 
-    for original, aug1, aug2 in train_dataset:
-        print(original.shape, aug1.shape, aug2.shape)
+    # for original, aug1, aug2 in train_dataset:
+    #    print(original.shape, aug1.shape, aug2.shape)
 
     # ACDC
     img_path = "../ACDC"
     train_ids = Dataset.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
-    train_dataset = DatasetGD(acdc, train_ids, 4, img_path, preprocessed_data=True)
+    train_dataset = DatasetGD(acdc, train_ids, 4, img_path, preprocessed_data=False)
 
     for original, aug1, aug2 in train_dataset:
         print(original.shape, aug1.shape, aug2.shape)
@@ -227,5 +227,5 @@ print(max)
 # preprocess_all_data()
 # test_dataloader_random()
 # test_dataloaderGR()
-# test_dataloaderGD()
-test_N4_bias()
+test_dataloaderGD()
+# test_N4_bias()

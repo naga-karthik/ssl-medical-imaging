@@ -301,13 +301,13 @@ class DatasetGD(DatasetGeneric):
         processed_volume_complete = np.array(processed_volume)
         if self.seg_path is None:
             processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
-            processed_volume_complete = np.moveaxis(processed_volume_complete, 2, 1)
+            processed_volume_complete = np.moveaxis(processed_volume_complete, 0, 2)
             print("final volume", processed_volume_complete.shape)
             return processed_volume_complete
 
         processed_seg_complete = np.array(processed_seg)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
-        processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+        processed_data_complete = np.moveaxis(processed_data_complete, 0, 2)
         print("final volume + seg", processed_data_complete.shape)
         return processed_data_complete
 
