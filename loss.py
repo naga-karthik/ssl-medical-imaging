@@ -142,8 +142,6 @@ class Loss:
         # get the full similarity matrix 
         similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (3*batch-size) x (3*batch-size)
 
-        # initialize arrays to set the indices of the positive and negative samples (shape: (2*batch-size) x (2*batch-size))
-        # finds a positive sample (2*batch-size)//2 away from the original sample
         # for GD-, the positive sample indices are similar to GR (simclr)
         # pos_sample_indicators = torch.roll(torch.eye(N), batch_size, 1) + torch.roll(torch.eye(N), 2*batch_size, 1)
         pos_sample_indicators_1 = torch.roll(torch.eye(N), batch_size, 1).to(proj_feat1.device) 
@@ -202,28 +200,37 @@ class Loss:
         # initialize arrays to set the indices of the positive and negative samples (shape: (4*batch-size) x (4*batch-size))
         # here, the positive sample strategy is similar to neg samples in GD-, except where there are 0s in GD- (denoting samples to not 
         # constrast against), they become 1s in GD for positives
-        N = 4*batch_size
-        pos_sample_indicators = torch.zeros(N)
+        N = 3*batch_size
+        pos_sample_indicators_1 = torch.zeros(N)
+        pos_sample_indicators_2 = torch.zeros(N)
+        pos_sample_indicators_3 = torch.zeros(N)
         for i in range(batch_size // partition_size):
-            pos_sample_indicators = pos_sample_indicators 
-            + torch.roll(torch.eye(N), i*partition_size, 1) 
-            + torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
-            + torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
-        pos_sample_indicators = pos_sample_indicators.to(proj_feat1.device)
-        
-        # # the negative sample indices remain unchanged from GD-'s negative sample indices
-        # neg_sample_indicators = torch.ones(N)
+            pos_sample_indicators_1 = (pos_sample_indicators_1 + torch.roll(torch.eye(N), i*partition_size, 1)).to(proj_feat1.device) 
+            pos_sample_indicators_2 = (pos_sample_indicators_2 + torch.roll(torch.eye(N), i*partition_size+batch_size, 1)).to(proj_feat1.device) 
+            pos_sample_indicators_3 = (pos_sample_indicators_3 + torch.roll(torch.eye(N), i*partition_size+2*batch_size, 1)).to(proj_feat1.device) 
+
         # for i in range(batch_size // partition_size):
-        #     neg_sample_indicators = neg_sample_indicators 
-        #     - torch.roll(torch.eye(N), i*partition_size, 1) 
-        #     - torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
-        #     - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
-        # neg_sample_indicators = neg_sample_indicators.to(proj_feat1.device)
-        # shorter version
-        neg_sample_indicators = (~pos_sample_indicators.bool()).float() - torch.eye(N)
+        #     pos_sample_indicators = pos_sample_indicators 
+        #     + torch.roll(torch.eye(N), i*partition_size, 1) 
+        #     + torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
+        #     + torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+        # pos_sample_indicators = pos_sample_indicators.to(proj_feat1.device)
+        
+        # the negative sample indices remain unchanged from GD-'s negative sample indices
+        neg_sample_indicators = torch.ones(N)
+        for i in range(batch_size // partition_size):
+            neg_sample_indicators = neg_sample_indicators 
+            - torch.roll(torch.eye(N), i*partition_size, 1) 
+            - torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
+            - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+        neg_sample_indicators = neg_sample_indicators.to(proj_feat1.device)
+        # # shorter version
+        # neg_sample_indicators = (~pos_sample_indicators.bool()).float() - torch.eye(N)
 
         # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
-        numerator = torch.exp(similarity_matrix/temperature)[pos_sample_indicators.bool()]
+        numerator_pos_1 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_1.bool()]
+        numerator_pos_2 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_2.bool()]
+        numerator_pos_3 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_3.bool()]                
         # calculate the denominator by summing over each pair except for the diagonal elements
         denominator = torch.sum((torch.exp(similarity_matrix/temperature)*neg_sample_indicators), dim=1)
 
@@ -231,7 +238,11 @@ class Loss:
         if (denominator < 1e-8).any():
             denominator = torch.clamp(denominator, 1e-8)
 
-        loss = torch.mean(-torch.log(numerator/denominator))
+        # loss = torch.mean(-torch.log((numerator_pos_1 + numerator_pos_2 + numerator_pos_3)/denominator))
+        loss1 = torch.mean(-torch.log(numerator_pos_1/denominator))
+        loss2 = torch.mean(-torch.log(numerator_pos_2/denominator))
+        loss3 = torch.mean(-torch.log(numerator_pos_3/denominator))
+        loss = (loss1+loss2+loss3)/3.0
         return loss
 
     def cos_sim(self, vect1, vect2):
