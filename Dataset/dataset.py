@@ -234,9 +234,7 @@ class DatasetGR(DatasetGeneric):
         print("THIS PART IS NOT CORRECTLY IMPLEMENTED AS NOT REQUIRED")
 
 
-# TODO implement data loader GD
-
-class DatasetGDMinus(DatasetGeneric):
+class DatasetGD(DatasetGeneric):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
         self.padding_list = []
@@ -303,7 +301,7 @@ class DatasetGDMinus(DatasetGeneric):
         processed_volume_complete = np.array(processed_volume)
         if self.seg_path is None:
             processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
-            processed_volume_complete = np.moveaxis(processed_volume_complete, 2, 1)
+            processed_volume_complete = np.moveaxis(processed_volume_complete, 0, 2)
             print("final volume", processed_volume_complete.shape)
             return processed_volume_complete
 
