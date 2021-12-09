@@ -24,7 +24,7 @@ import torchvision.transforms as transforms
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, ProjectorHead
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DatasetGR, DatasetGDMinus
+from Dataset.dataset import DatasetGR, DatasetGD
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
@@ -34,7 +34,7 @@ seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='GR_Pretrain', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='GDminus_Pretrain', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
@@ -52,8 +52,8 @@ parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of
 parser.add_argument('-np', '--num_partitions', default=4, type=int, help='No. of partitions per volume')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
-parser.add_argument('-ep', '--epochs', default=250, type=int, help='Number of epochs to train')
-parser.add_argument('-bs', '--batch_size', default=64, type=int, help='Batch size')
+parser.add_argument('-ep', '--epochs', default=150, type=int, help='Number of epochs to train')
+parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
 parser.add_argument('-lr', '--learning_rate', default=1e-3, type=float, help="Learning rate to use")
@@ -75,10 +75,10 @@ class SegModel(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         # self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
-        self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.train_dataset = DatasetGD(self.cfg.dataset, self.train_ids_acdc, self.cfg.num_partitions, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = DatasetGD(self.cfg.dataset, self.val_ids_acdc, self.cfg.num_partitions, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
-        self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
+        self.loss = Loss(loss_type=1, encoder_strategy='gd-', device=self.device)
         
     def forward(self, x):
         return self.net(x)
@@ -94,9 +94,9 @@ class SegModel(pl.LightningModule):
         img_aug2 = img_aug2.view(b*p, 1, h, w)
 
         # get the latent representations by passing each augmented image through the encoder
-        latent_reps_unaug = self.encoder(orig_img)
-        latent_reps_aug1 = self.encoder(img_aug1)
-        latent_reps_aug2 = self.encoder(img_aug2)
+        latent_reps_unaug, context_feats_unaug = self.encoder(orig_img)
+        latent_reps_aug1, context_feats_aug1 = self.encoder(img_aug1)
+        latent_reps_aug2, context_feats_aug2 = self.encoder(img_aug2)
         # get the final z's for the contrastive loss by passing through the projector head
         z_aug0 = self.projector(latent_reps_unaug)
         z_aug1 = self.projector(latent_reps_aug1)
@@ -256,7 +256,7 @@ def main(cfg):
     # pretrained_encoder.eval()
     # print(f"Pretrained Encoder model: \n{pretrained_encoder} ")
 
-    save_path = "./best_encoder_model.pt"    # current folder    
+    save_path = "./best_enc_model_GDminus.pt"    # current folder    
     print("------- Loading the Best Model! ------")     # the PyTorch Lightning way
     # load the best checkpoint after training
     loaded_model = model.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
