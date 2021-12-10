@@ -22,10 +22,9 @@ from torch.utils.data import DataLoader, dataloader
 import torchvision.transforms as transforms
 
 # dataloaders and segmentation models
-from seg_models import SegUnetFullModel, SegUnetEncoder_and_ProjectorG1, SegUnetDecoder
-from seg_models_v2 import UNet
+from seg_models_v2 import UNetEncoder, ProjectorHead
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DataloaderRandom
+from Dataset.dataset import DatasetGR, DatasetGD
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
@@ -35,10 +34,10 @@ seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='R-R_Test-NewUNet-withAugs-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='GR_Pretrain', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
-parser.add_argument('-nti', '--num_train_imgs', default='tr8', type=str, help='Number of training images, options tr1, tr8 or tr52')
+parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
 parser.add_argument('-cti', '--comb_train_imgs', default='c1', type=str, help='Combintation of Train imgs., options c1, c2, cr3, cr4, cr5')
 parser.add_argument('--img_path', default=img_path, type=str, help='Absolute path of the training data')
 parser.add_argument('--seg_path', default=seg_path, type=str, help='Same as path of training data')
@@ -52,7 +51,7 @@ parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Outp
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
-parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
+parser.add_argument('-ep', '--epochs', default=250, type=int, help='Number of epochs to train')
 parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
@@ -65,54 +64,57 @@ class SegModel(pl.LightningModule):
     def __init__(self, cfg):
         super(SegModel, self).__init__()
         self.cfg = cfg
-        # self.net = SegUnetFullModel(
-        #     in_channels=self.cfg.in_channels, 
-        #     num_filters_list=self.cfg.num_filters_list,
-        #     fc_units=self.cfg.fc_units_list,
-        #     g1_out_dim=self.cfg.g1_out_dim, 
-        #     num_classes=self.cfg.num_classes
-        # )
-        self.net = UNet(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
+        self.save_hyperparameters()
+
+        # self.net = UNet(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
+        self.encoder = UNetEncoder(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters)
+        self.projector = ProjectorHead(encoder_init_filters=self.cfg.init_num_filters, out_dim=self.cfg.g1_out_dim)
 
         self.train_ids_acdc = data_init_acdc.train_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
-        self.test_ids_acdc = data_init_acdc.test_data()
+        # self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DataloaderRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
+        self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
-        self.loss = Loss(loss_type=0, device=self.device)
+        self.loss = Loss(loss_type=1, encoder_strategy='gr', device=self.device)
         
     def forward(self, x):
         return self.net(x)
 
     def compute_loss(self, batch):
-        imgs, gts = batch
-        imgs, gts = imgs.float(), gts.long()
-        logits, preds = self.net(imgs)
-        # print(torch.unique(gts), gts.shape)
+        img_aug1, img_aug2 = batch
+        img_aug1, img_aug2 = img_aug1.float(), img_aug2.float()
 
-        gts_one_hot = self.loss.one_hot(gts, num_classes=self.cfg.num_classes)  # convert to one-hot for Dice loss
-        loss = self.loss.compute(preds, gts_one_hot, multiclass=True)
-        return loss, preds, imgs, gts        
+        # get the latent representations by passing each augmented image through the encoder
+        # latent_reps_aug1 = self.encoder(img_aug1)   # this is storing them as tuple; encoder has 2 outputs
+        # latent_reps_aug2 = self.encoder(img_aug2)
+        latent_reps_aug1, _ = self.encoder(img_aug1)
+        latent_reps_aug2, _ = self.encoder(img_aug2)
+        # get the final z's for the contrastive loss by passing through the projector head
+        z_aug1 = self.projector(latent_reps_aug1)
+        z_aug2 = self.projector(latent_reps_aug2)
+
+        contrastive_loss = self.loss.compute(proj_feat0=None, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=None, prediction=None)
+
+        return contrastive_loss
     
     def training_step(self, batch, batch_nb):
-        loss, preds, imgs, gts = self.compute_loss(batch)
-        self.log('train_loss', loss, on_step=False, on_epoch=True)
+        loss = self.compute_loss(batch)
+        self.log('train_contrastive_loss', loss, on_step=False, on_epoch=True)
 
-        if batch_nb == 0: # once per epoch
-            fig = visualize(preds, imgs, gts)
-            wandb.log({"Training Output Visualizations": fig})
+        # if batch_nb == 0: # once per epoch
+        #     fig = visualize(preds, imgs, gts)
+        #     wandb.log({"Training Output Visualizations": fig})
         return loss
 
     def validation_step(self, batch, batch_nb):
-        loss, preds, imgs, gts = self.compute_loss(batch)
-        self.log('valid_loss', loss, on_step=False, on_epoch=True)
+        loss = self.compute_loss(batch)
+        self.log('valid_contrastive_loss', loss, on_step=False, on_epoch=True)
 
-        if batch_nb == 0: # once per epoch
-            fig = visualize(preds, imgs, gts)
-            wandb.log({"Validation Output Visualizations": fig})
+        # if batch_nb == 0: # once per epoch
+        #     fig = visualize(preds, imgs, gts)
+        #     wandb.log({"Validation Output Visualizations": fig})
     
     def test_step(self, batch, batch_nb):
         loss, preds, imgs, gts = self.compute_loss(batch)
@@ -156,9 +158,9 @@ class SegModel(pl.LightningModule):
         return DataLoader(self.valid_dataset, batch_size = self.cfg.batch_size,
                              shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
     
-    def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
-                             shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
+    # def test_dataloader(self):
+    #     return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
+    #                          shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
 
 def visualize(preds, imgs, gts, num_imgs=10):
     main_colors = torch.tensor([
@@ -201,7 +203,7 @@ def main(cfg):
                             name='%s <- %d'%(cfg.exp_name, timestamp), 
                             group= '%s'%(cfg.exp_name), 
                             log_model=True, # save best model using checkpoint callback
-                            project='supervised-train',
+                            project='self-supervised-pretrain',
                             entity='ssl-medical-imaging',
                             config=cfg,
     )
@@ -209,7 +211,7 @@ def main(cfg):
     # to save the best model on validation
     checkpoint = pl.callbacks.ModelCheckpoint(
         filename="best_model"+str(timestamp),
-        monitor="valid_loss",
+        monitor="valid_contrastive_loss",
         save_top_k=1,
         mode="max",
         save_last=False,
@@ -232,8 +234,27 @@ def main(cfg):
     trainer.fit(model)
     print("------- Training Done! -------")
 
-    print("------- Testing Begins! -------")
-    trainer.test(model)
+    # print("------- Saving the Best Model! -------")
+    # torch.save(model.state_dict(), save_path)
+
+    # print("------- Loading the Best Model! ------")     # the standard PyTorch Way
+    # # load the best checkpoint after training
+    # loaded_model = model.load_state_dict(torch.load(save_path), strict=False) # .load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
+    # pretrained_encoder = loaded_model.encoder
+    # pretrained_encoder.eval()
+    # print(f"Pretrained Encoder model: \n{pretrained_encoder} ")
+
+    save_path = "./best_encoder_model.pt"    # current folder    
+    print("------- Loading the Best Model! ------")     # the PyTorch Lightning way
+    # load the best checkpoint after training
+    loaded_model = model.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
+    pretrained_encoder = loaded_model.encoder
+    # pretrained_encoder.eval()
+    # print(f"Pretrained Encoder model: \n{pretrained_encoder} ")    
+    torch.save(pretrained_encoder.state_dict(), save_path)
+
+    # print("------- Testing Begins! -------")
+    # trainer.test(model)
 
 if __name__ == '__main__':
     main(cfg)
