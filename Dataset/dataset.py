@@ -1,13 +1,27 @@
 import os
 import random
+
 import nibabel as nib
 import numpy as np
 from torch.utils.data import Dataset
 from os import walk
 from skimage import transform
+import torch
+import albumentations as A
+import cv2
+import SimpleITK as sitk
+
+transform_fct = A.Compose([
+    A.Rotate(15),
+    A.HorizontalFlip(p=0.5),
+    A.RandomResizedCrop(192, 192, scale=(0.95, 1.05), interpolation=cv2.INTER_NEAREST),
+    A.RandomRotate90(p=0.5),
+    A.ColorJitter(brightness=[0.7, 1.3], contrast=[0.7, 1.3], saturation=0, hue=0),
+    A.ElasticTransform(alpha=1, sigma=50, alpha_affine=25),
+])
 
 
-class Dataloader(Dataset):
+class DatasetGeneric(Dataset):
 
     def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
         """
@@ -45,6 +59,28 @@ class Dataloader(Dataset):
             affine[0, 0] = self.data_info["resolution"][0]
             affine[1, 1] = self.data_info["resolution"][1]
 
+        bias_correction = False
+
+        if bias_correction:
+
+            # parameters for ACDC
+            threshold_value = 0.001
+            n_fitting_levels = 4
+            n_iters = 50
+
+            itk_image = sitk.GetImageFromArray(volume)
+            inputImage = sitk.Cast(itk_image, sitk.sitkFloat32)
+
+            # Apply N4 bias correction
+            corrector = sitk.N4BiasFieldCorrectionImageFilter()
+            corrector.SetConvergenceThreshold(threshold_value)
+            corrector.SetMaximumNumberOfIterations([int(n_iters)] * n_fitting_levels)
+
+            # Save the bias corrected output file
+            output = corrector.Execute(inputImage)
+
+            volume = sitk.GetArrayViewFromImage(output)
+
         array_vol = nib.Nifti1Image(volume, affine)
         complete_path = os.path.join(str(path), filename)
         nib.save(array_vol, complete_path)
@@ -71,6 +107,7 @@ class Dataloader(Dataset):
                 filename_seg = f"{sub_folder}/patient{idx:03d}_frame04_gt{sub}.nii.gz"
             else:
                 print(f"ERROR: no suitable file found for patient{idx:03d}")
+                exit()
 
         return filename, filename_seg
 
@@ -93,21 +130,7 @@ class Dataloader(Dataset):
     def get_processed_seg(self, filename_seg):
         return self.get_processed_data(filename_seg, self.seg_path, True)
 
-
-class DataloaderRandom(Dataloader):
-    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
-        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
-        self.data = self.load_data()
-        print(data_info, "final shape", self.data.shape)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        # print(self.data[idx][1, None, :].shape)
-        return self.data[idx][0, None, :], one_hot_encoding(self.data[idx][1, None, :], self.data_info["num_class"])
-
-    def load_data(self):
+    def load_data_full(self):
 
         processed_volume = []
         processed_seg = []
@@ -129,26 +152,96 @@ class DataloaderRandom(Dataloader):
             # print(idx, len(processed_volume))
 
         processed_volume_complete = np.array(processed_volume)
+
         if self.seg_path is None:
             # print("final volume", processed_volume_complete.shape)
-            return processed_volume_complete
+            processed_volume_complete = processed_volume_complete.astype(np.float32)
+            return processed_volume_complete[:, None, ...]
 
         processed_seg_complete = np.array(processed_seg)
         # print(processed_volume_complete.shape, processed_seg_complete.shape)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
         processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+
+        processed_data_complete = processed_data_complete.astype(np.float32)
         # print("final volume", processed_data_complete.shape)
         return processed_data_complete
 
 
-class DataloaderCustom(Dataloader):
+class DatasetRandom(DatasetGeneric):
+    """
+    returns random slices for fine-tuning
+    """
+
+    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None, augmentation=False):
+        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
+        self.data = super().load_data_full()
+        self.augmentation = augmentation
+        print(data_info, "final shape", self.data.shape, "batches", len(self.data))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+
+        # volume data
+        vol = self.data[idx][0]
+        vol = vol.astype(np.float32)
+
+        if self.seg_path is None:
+            if self.augmentation:
+                vol = vol.astype(np.float32)
+                vol = transform_fct(image=vol)['image']
+            return torch.from_numpy(vol[None, :])
+
+        # segment data
+        seg = self.data[idx][1]
+        seg = seg.astype(np.float32)
+
+        if self.augmentation:
+            transformed = transform_fct(image=vol, mask=seg)
+            vol = transformed['image']
+            seg = transformed['mask']
+
+        vol = torch.from_numpy(vol[None, :])
+        seg = torch.from_numpy(seg[None, :])
+
+        return vol, seg
+
+
+class DatasetGR(DatasetGeneric):
+    """
+       returns random slices for training
+       """
+
+    def __init__(self, data_info, ids, vol_path, preprocessed_data=False, seg_path=None):
+        super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
+        self.data = super().load_data_full()
+        print(data_info, "final shape", self.data.shape, "batches", len(self.data))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # volume data
+        vol = self.data[idx][0]
+        vol = vol.astype(np.float32)
+
+        if self.seg_path is None:
+            vol_aug1 = transform_fct(image=vol)['image']
+            vol_aug2 = transform_fct(image=vol)['image']
+            return torch.from_numpy(vol_aug1[None, :]), torch.from_numpy(vol_aug2[None, :])
+
+        print("THIS PART IS NOT CORRECTLY IMPLEMENTED AS NOT REQUIRED")
+
+class DatasetGD(DatasetGeneric):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
         self.padding_list = []
         super().__init__(data_info, ids, vol_path, preprocessed_data, seg_path)
         self.partition = partition
         self.data = self.load_data()
-        print(data_info, "final shape", self.data.shape)
+        print(data_info, "final shape", self.data.shape, "batches", len(self.ids))
 
     def __len__(self):
         return len(self.ids)
@@ -157,33 +250,24 @@ class DataloaderCustom(Dataloader):
         slices = self.data[idx]
 
         # remove padding
-        slices = slices[:, :-self.padding_list[idx]]
-        no_all_slices = slices[0].shape[0]
+        slices = slices[:-self.padding_list[idx]]
+        no_all_slices = slices.shape[0]
 
-        selected_slices = []
-        group_size = no_all_slices // self.partition
-        for i in range(self.partition):
-            # for last partition, take random slice until the end
-            if i == self.partition - 1:
-                random_slice_idx = random.randint(i * group_size, no_all_slices - 1)
-                # print(f"random value between {i * group_size} and {no_all_slices - 1} is {random_slice_idx}")
-            else:
-                random_slice_idx = random.randint(i * group_size, (i + 1) * group_size - 1)
-                # print(f"random value between {i * group_size} and {(i + 1) * group_size - 1} is {random_slice_idx}")
+        slice_per_partion = no_all_slices // self.partition
+        rand_ints = np.random.randint(low=0, high=slice_per_partion, size=self.partition)
 
-            random_slice = slices[:, random_slice_idx]
-            selected_slices.append(random_slice)
+        partition_starts = np.arange(self.partition) * slice_per_partion
+        rand_indxs = np.asarray(partition_starts + rand_ints)
 
-        selected_slices_complete = np.array(selected_slices)
-
-        selected_slices_complete = selected_slices_complete[:, :, None, :, :]
+        selected_slices_complete = slices[rand_indxs, :]
 
         if self.seg_path is None:
-            # print("final slices", selected_slices_complete[:, 0].shape)
-            return selected_slices_complete[:, 0]
+            original = selected_slices_complete.astype(np.float32)
+            aug1 = np.array([transform_fct(image=xi[0])['image'] for xi in original])[:, None, ...]
+            aug2 = np.array([transform_fct(image=xi[0])['image'] for xi in original])[:, None, ...]
+            return torch.from_numpy(original), torch.from_numpy(aug1), torch.from_numpy(aug2)
 
-        return selected_slices_complete[:, 0], one_hot_encoding(selected_slices_complete[:, 1],
-                                                                self.data_info["num_class"], True)
+        print("THIS PART IS NOT CORRECTLY IMPLEMENTED AS NOT REQUIRED")
 
     def load_data(self):
 
@@ -217,14 +301,14 @@ class DataloaderCustom(Dataloader):
         processed_volume_complete = np.array(processed_volume)
         if self.seg_path is None:
             processed_volume_complete = np.expand_dims(processed_volume_complete, axis=0)
-            processed_volume_complete = np.moveaxis(processed_volume_complete, 1, 0)
-            # print("final volume", processed_volume_complete.shape)
+            processed_volume_complete = np.moveaxis(processed_volume_complete, 0, 2)
+            print("final volume", processed_volume_complete.shape)
             return processed_volume_complete
 
         processed_seg_complete = np.array(processed_seg)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
-        processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
-        # print("final volume + seg", processed_data_complete.shape)
+        processed_data_complete = np.moveaxis(processed_data_complete, 0, 2)
+        print("final volume + seg", processed_data_complete.shape)
         return processed_data_complete
 
 
@@ -296,14 +380,8 @@ def crop_or_pad(slice, dim_new):
 
 
 def one_hot_encoding(seg, nb_classes, custom=False):
-    # print(seg.shape, seg.max())
-    # res = np.eye(nb_classes)[np.array(seg[0]).reshape(-1)]
-    # seg = res.reshape(list(seg[0].shape) + [nb_classes])
     if custom:
-        seg = (np.arange(nb_classes) == seg[:,0,..., None] - 1).astype(int)
+        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(1, 4).squeeze(-1)
     else:
-        seg = (np.arange(nb_classes) == seg[0,..., None] - 1).astype(int)
-    seg = np.moveaxis(seg, -1, 0)
-    # seg = np.eye(nb_classes)[seg[0]]
-    # print(seg.shape, seg.max())
+        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(0, 3).squeeze(-1)
     return seg
