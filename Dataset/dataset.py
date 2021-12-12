@@ -1,5 +1,6 @@
 import os
 import random
+
 import nibabel as nib
 import numpy as np
 from torch.utils.data import Dataset
@@ -233,7 +234,6 @@ class DatasetGR(DatasetGeneric):
 
         print("THIS PART IS NOT CORRECTLY IMPLEMENTED AS NOT REQUIRED")
 
-
 class DatasetGD(DatasetGeneric):
     def __init__(self, data_info, ids, partition, vol_path, preprocessed_data=False, seg_path=None):
         self.pad_frames = 25
@@ -307,7 +307,7 @@ class DatasetGD(DatasetGeneric):
 
         processed_seg_complete = np.array(processed_seg)
         processed_data_complete = np.stack((processed_volume_complete, processed_seg_complete), axis=0)
-        processed_data_complete = np.moveaxis(processed_data_complete, 1, 0)
+        processed_data_complete = np.moveaxis(processed_data_complete, 0, 2)
         print("final volume + seg", processed_data_complete.shape)
         return processed_data_complete
 
@@ -380,14 +380,8 @@ def crop_or_pad(slice, dim_new):
 
 
 def one_hot_encoding(seg, nb_classes, custom=False):
-    # print(seg.shape, seg.max())
-    # res = np.eye(nb_classes)[np.array(seg[0]).reshape(-1)]
-    # seg = res.reshape(list(seg[0].shape) + [nb_classes])
     if custom:
-        seg = (np.arange(nb_classes) == seg[:,0,..., None] - 1).astype(int)
+        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(1, 4).squeeze(-1)
     else:
-        seg = (np.arange(nb_classes) == seg[0,..., None] - 1).astype(int)
-    seg = np.moveaxis(seg, -1, 0)
-    # seg = np.eye(nb_classes)[seg[0]]
-    # print(seg.shape, seg.max())
+        seg = torch.nn.functional.one_hot(seg.to(torch.int64), nb_classes).transpose(0, 3).squeeze(-1)
     return seg

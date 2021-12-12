@@ -1,4 +1,4 @@
-from Dataset.dataset import DatasetGDMinus, DatasetRandom, DatasetGR
+from Dataset.dataset import DatasetGD, DatasetRandom, DatasetGR
 from Dataset.init_data import md_prostate, acdc
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,7 +8,7 @@ from PIL import Image
 
 
 def test_custom_seg():
-    test_loader = DatasetGDMinus(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False,
+    test_loader = DatasetGD(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False,
                                  seg_path="../Task05_Prostate/labels")
 
     for test_images, test_labels in test_loader:
@@ -16,7 +16,7 @@ def test_custom_seg():
 
 
 def test_custom_vol_only():
-    test_dataset = DatasetGDMinus(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False)
+    test_dataset = DatasetGD(md_prostate, [1, 6], 4, "../Task05_Prostate/images", preprocessed_data=False)
 
     for original, aug1, aug2 in test_dataset:
         print(original.shape, aug1.shape, aug2.shape)
@@ -41,7 +41,7 @@ def test_augmentions():
         axs[1].imshow(test_images.numpy()[0] - test_labels.numpy()[0], cmap='gray')
         fig.show()
 
-    train_loader = DatasetGDMinus(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
+    train_loader = DatasetGD(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
 
     for original, aug1, aug2 in train_loader:
         for i in range(4):
@@ -126,22 +126,22 @@ def test_dataloaderGR():
         print(aug1.shape, aug2.shape)
 
 
-def test_dataloaderGDMinus():
-    no_of_tr_imgs = 'tr1'
+def test_dataloaderGD():
+    no_of_tr_imgs = 'tr52'
     # change this to 'c1', 'c2', 'cr3', 'cr4', 'cr5'
     comb_of_tr_imgs = 'c1'
     # md_prostate
-    img_path = "../Task05_Prostate/images"
-    train_ids = Dataset.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
-    train_dataset = DatasetGDMinus(md_prostate, train_ids, 4, img_path, preprocessed_data=True)
+    # img_path = "../Task05_Prostate/images"
+    # train_ids = Dataset.experiments_paper.data_init_prostate_md.train_data(no_of_tr_imgs, comb_of_tr_imgs)
+    # train_dataset = DatasetGD(md_prostate, train_ids, 4, img_path, preprocessed_data=True)
 
-    for original, aug1, aug2 in train_dataset:
-        print(original.shape, aug1.shape, aug2.shape)
+    # for original, aug1, aug2 in train_dataset:
+    #    print(original.shape, aug1.shape, aug2.shape)
 
     # ACDC
     img_path = "../ACDC"
     train_ids = Dataset.experiments_paper.data_init_acdc.train_data(no_of_tr_imgs, comb_of_tr_imgs)
-    train_dataset = DatasetGDMinus(acdc, train_ids, 4, img_path, preprocessed_data=True)
+    train_dataset = DatasetGD(acdc, train_ids, 4, img_path, preprocessed_data=False)
 
     for original, aug1, aug2 in train_dataset:
         print(original.shape, aug1.shape, aug2.shape)
@@ -180,7 +180,7 @@ def test_N4_bias():
         axs[1].imshow(test_images.numpy()[0] - test_labels.numpy()[0], cmap='gray')
         fig.show()
 
-    train_loader = DatasetGDMinus(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
+    train_loader = DatasetGD(acdc, train_ids, 4, "../ACDC", preprocessed_data=True)
 
     for original, aug1, aug2 in train_loader:
         for i in range(4):
@@ -227,5 +227,5 @@ print(max)
 # preprocess_all_data()
 # test_dataloader_random()
 # test_dataloaderGR()
-# test_dataloaderGDMinus()
-test_N4_bias()
+test_dataloaderGD()
+# test_N4_bias()
