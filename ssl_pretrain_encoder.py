@@ -1,5 +1,4 @@
 # utility packages
-from functools import cmp_to_key
 import os
 import time
 import argparse
@@ -34,7 +33,7 @@ seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='GR_Pretrain', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='Pretrain-refactor-test', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
@@ -49,9 +48,11 @@ parser.add_argument('-num_flt', '--init_num_filters', type=int, default=32, help
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024], help='List containing no. of units in FC layers')
 parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Output dimension for the projector head')
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
+parser.add_argument('-np', '--num_partitions', default=4, type=int, help='No. of partitions per volume')
+parser.add_argument('-st', '--strategy', default='GR', type=str, help='Strategy for pretraining; Options: GR, GD-, GD, GD-alt')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
-parser.add_argument('-ep', '--epochs', default=250, type=int, help='Number of epochs to train')
+parser.add_argument('-ep', '--epochs', default=10, type=int, help='Number of epochs to train')
 parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
@@ -66,7 +67,6 @@ class SegModel(pl.LightningModule):
         self.cfg = cfg
         self.save_hyperparameters()
 
-        # self.net = UNet(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
         self.encoder = UNetEncoder(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters)
         self.projector = ProjectorHead(encoder_init_filters=self.cfg.init_num_filters, out_dim=self.cfg.g1_out_dim)
 
@@ -74,33 +74,74 @@ class SegModel(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         # self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
-        self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        # # Comment/Uncomment these for pretraining the encoder with the GR (SimCLR) strategy
+        # self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        # self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
-        self.loss = Loss(loss_type=1, encoder_strategy='gr', device=self.device)
+        # Comment/Uncomment these for pretraining the encoder with the GDminus, GD, and GD-alt strategies
+        self.train_dataset = DatasetGD(self.cfg.dataset, self.train_ids_acdc, self.cfg.num_partitions, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = DatasetGD(self.cfg.dataset, self.val_ids_acdc, self.cfg.num_partitions, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+
+        # Choosing the loss function
+        self.loss = Loss(loss_type=1, encoder_strategy=self.cfg.strategy, device=self.device)    # also make a change on line 269 for saving with the correct file name    
+
+        print("--------------------------------------------------------------")
+        print(f"PRETRAINING THE ENCODER WITH THE {self.cfg.strategy} STRATEGY!")
+        print("--------------------------------------------------------------")
         
     def forward(self, x):
         return self.net(x)
 
-    def compute_loss(self, batch):
-        img_aug1, img_aug2 = batch
-        img_aug1, img_aug2 = img_aug1.float(), img_aug2.float()
+    def compute_loss(self, batch, strategy):
+        """
+        Loss function for pretraining the encoder with various contrastive strategies 
+        """
+        if strategy == 'GR':
+            img_aug1, img_aug2 = batch
+            img_aug1, img_aug2 = img_aug1.float(), img_aug2.float()
 
-        # get the latent representations by passing each augmented image through the encoder
-        # latent_reps_aug1 = self.encoder(img_aug1)   # this is storing them as tuple; encoder has 2 outputs
-        # latent_reps_aug2 = self.encoder(img_aug2)
-        latent_reps_aug1, _ = self.encoder(img_aug1)
-        latent_reps_aug2, _ = self.encoder(img_aug2)
-        # get the final z's for the contrastive loss by passing through the projector head
-        z_aug1 = self.projector(latent_reps_aug1)
-        z_aug2 = self.projector(latent_reps_aug2)
+            # get the latent representations by passing each augmented image through the encoder
+            # latent_reps_aug1 = self.encoder(img_aug1)   # this is storing them as tuple; encoder has 2 outputs
+            # latent_reps_aug2 = self.encoder(img_aug2)
+            latent_reps_aug1, _ = self.encoder(img_aug1)
+            latent_reps_aug2, _ = self.encoder(img_aug2)
+            # get the final z's for the contrastive loss by passing through the projector head
+            z_aug1 = self.projector(latent_reps_aug1)
+            z_aug2 = self.projector(latent_reps_aug2)
 
-        contrastive_loss = self.loss.compute(proj_feat0=None, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=None, prediction=None)
+            contrastive_loss = self.loss.compute(proj_feat0=None, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=None, prediction=None)
+            return contrastive_loss
+        
+        elif strategy == 'GD-' or strategy == 'GD-alt':
+            orig_img, img_aug1, img_aug2 = batch    # size of each is batch_size, partition_num, 1, 192, 192 
+            orig_img, img_aug1, img_aug2 = orig_img.float(), img_aug1.float(), img_aug2.float()
+            b, p, h, w = orig_img.squeeze().shape
 
-        return contrastive_loss
-    
+            # flattened so that batch_size and the partition_num are clubbed and the in_channels remain the same
+            orig_img = orig_img.view(b*p, 1, h, w)  # so the batch_size dimension essentially becomes batch_size*partition
+            img_aug1 = img_aug1.view(b*p, 1, h, w)
+            img_aug2 = img_aug2.view(b*p, 1, h, w)
+
+            # get the latent representations by passing each augmented image through the encoder
+            latent_reps_unaug, context_feats_unaug = self.encoder(orig_img)
+            latent_reps_aug1, context_feats_aug1 = self.encoder(img_aug1)
+            latent_reps_aug2, context_feats_aug2 = self.encoder(img_aug2)
+            # get the final z's for the contrastive loss by passing through the projector head
+            z_aug0 = self.projector(latent_reps_unaug)
+            z_aug1 = self.projector(latent_reps_aug1)
+            z_aug2 = self.projector(latent_reps_aug2)
+
+            if strategy == 'GD-':
+                contrastive_loss = self.loss.compute(proj_feat0=z_aug0, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=p, prediction=None)
+            elif strategy == 'GD-alt':
+                contrastive_loss = self.loss.compute(proj_feat0=z_aug0, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=None, prediction=None)
+            return contrastive_loss
+
+        elif strategy == 'GD':
+            pass
+
     def training_step(self, batch, batch_nb):
-        loss = self.compute_loss(batch)
+        loss = self.compute_loss(batch, strategy=self.cfg.strategy)
         self.log('train_contrastive_loss', loss, on_step=False, on_epoch=True)
 
         # if batch_nb == 0: # once per epoch
@@ -109,7 +150,7 @@ class SegModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_nb):
-        loss = self.compute_loss(batch)
+        loss = self.compute_loss(batch, strategy=self.cfg.strategy)
         self.log('valid_contrastive_loss', loss, on_step=False, on_epoch=True)
 
         # if batch_nb == 0: # once per epoch
@@ -139,16 +180,10 @@ class SegModel(pl.LightningModule):
         return {'test_dice_score' : test_dice_score}
 
     def configure_optimizers(self):
-        # opt_params = { 'lr': 1e-4, 'weight_decay': 0, }
-        # scheduler_params={ 'T_0': 40, 'eta_min': 1e-5 }
-        # optimizer = eval(self.cfg.opt)(self.parameters(), **self.cfg.opt_params)
-        # scheduler = eval(self.cfg.scheduler)(optimizer, **self.cfg.scheduler_params)
-
         optimizer = optim.Adam(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, eta_min=1e-5)
         
         return [optimizer], [scheduler]
-        # return [optimizer]
     
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,
@@ -158,7 +193,7 @@ class SegModel(pl.LightningModule):
         return DataLoader(self.valid_dataset, batch_size = self.cfg.batch_size,
                              shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
     
-    # def test_dataloader(self):
+    # def test_dataloader(self):    # commented because not using test set during pretraining the encoder using any strategy
     #     return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
     #                          shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
 
@@ -234,17 +269,8 @@ def main(cfg):
     trainer.fit(model)
     print("------- Training Done! -------")
 
-    # print("------- Saving the Best Model! -------")
-    # torch.save(model.state_dict(), save_path)
-
-    # print("------- Loading the Best Model! ------")     # the standard PyTorch Way
-    # # load the best checkpoint after training
-    # loaded_model = model.load_state_dict(torch.load(save_path), strict=False) # .load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
-    # pretrained_encoder = loaded_model.encoder
-    # pretrained_encoder.eval()
-    # print(f"Pretrained Encoder model: \n{pretrained_encoder} ")
-
-    save_path = "./best_encoder_model.pt"    # current folder    
+    strategy = 'GR'     # options: "GR", "GDminus", "GD", "GDalt"
+    save_path = "./best_enc_model_" + strategy + ".pt"    # current folder    
     print("------- Loading the Best Model! ------")     # the PyTorch Lightning way
     # load the best checkpoint after training
     loaded_model = model.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
