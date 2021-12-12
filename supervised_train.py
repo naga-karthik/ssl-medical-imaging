@@ -22,7 +22,6 @@ from torch.utils.data import DataLoader, dataloader
 import torchvision.transforms as transforms
 
 # dataloaders and segmentation models
-from seg_models import SegUnetFullModel, SegUnetEncoder_and_ProjectorG1, SegUnetDecoder
 from seg_models_v2 import UNet
 from Dataset.init_data import acdc, md_prostate
 from Dataset.dataset import DataloaderRandom
@@ -50,6 +49,8 @@ parser.add_argument('-num_flt', '--init_num_filters', type=int, default=32, help
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024], help='List containing no. of units in FC layers')
 parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Output dimension for the projector head')
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
+parser.add_argument('-np', '--num_partitions', default=4, type=int, help='No. of partitions per volume')
+parser.add_argument('-st', '--strategy', default='GR', type=str, help='Strategy for pretraining; Options: GR, GD-, GD, GD-alt')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
 parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
@@ -82,7 +83,7 @@ class SegModel(pl.LightningModule):
         self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
         self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
 
-        self.loss = Loss(loss_type=0, device=self.device)
+        self.loss = Loss(loss_type=0, encoder_strategy=None, device=self.device)
         
     def forward(self, x):
         return self.net(x)
@@ -94,7 +95,7 @@ class SegModel(pl.LightningModule):
         # print(torch.unique(gts), gts.shape)
 
         gts_one_hot = self.loss.one_hot(gts, num_classes=self.cfg.num_classes)  # convert to one-hot for Dice loss
-        loss = self.loss.compute(preds, gts_one_hot, multiclass=True)
+        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, prediction=preds, target=gts_one_hot, multiclass=True)
         return loss, preds, imgs, gts        
     
     def training_step(self, batch, batch_nb):
