@@ -105,7 +105,8 @@ class Loss:
         pos_sample_indicators = torch.roll(torch.eye(2*batch_size), batch_size, 1).to(proj_feat1.device)   
         neg_sample_indicators = (torch.ones(2*batch_size) - torch.eye(2*batch_size)).to(proj_feat1.device)
 
-        # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
+        # calculate the numerator by selecting the appropriate indices of the positive samples using the
+        # pos_sample_indicators matrix
         numerator = torch.exp(similarity_matrix/temperature)[pos_sample_indicators.bool()]      # shape: [2*batch_size]
         # calculate the denominator by summing over each pair except for the diagonal elements
         denominator = torch.sum((torch.exp(similarity_matrix/temperature)*neg_sample_indicators), dim=1)     # shape: [2*batch_size]
