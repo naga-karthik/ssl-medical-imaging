@@ -22,19 +22,22 @@ from torch.utils.data import DataLoader, dataloader
 import torchvision.transforms as transforms
 
 # dataloaders and segmentation models
-from seg_models_v2 import UNet
+from seg_models_v2 import UNetEncoder, UNetDecoder
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DataloaderRandom
+from Dataset.dataset import DatasetRandom       # note: for finetuning we always use DatasetRandom
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
+# load paths for different pre-trained encoders (uncomment accordingly)
+# load_path = "./best_enc_model_GR.pt"    # for GR
+load_path = "./best_enc_model_GDminus.pt"    # for GD-
 
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='R-R_Test-NewUNet-withAugs-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='GDminus-R_Finetune-tr8', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
 parser.add_argument('-nti', '--num_train_imgs', default='tr8', type=str, help='Number of training images, options tr1, tr8 or tr52')
@@ -49,8 +52,6 @@ parser.add_argument('-num_flt', '--init_num_filters', type=int, default=32, help
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024], help='List containing no. of units in FC layers')
 parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Output dimension for the projector head')
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
-parser.add_argument('-np', '--num_partitions', default=4, type=int, help='No. of partitions per volume')
-parser.add_argument('-st', '--strategy', default='GR', type=str, help='Strategy for pretraining; Options: GR, GD-, GD, GD-alt')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
 parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
@@ -71,31 +72,39 @@ class SegModel(pl.LightningModule):
         #     num_filters_list=self.cfg.num_filters_list,
         #     fc_units=self.cfg.fc_units_list,
         #     g1_out_dim=self.cfg.g1_out_dim, 
-        #     num_classes=self.cfg.num_classes
-        # )
-        self.net = UNet(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
+        #     num_classes=self.cfg.num_classes)
+        self.encoder = UNetEncoder(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters)
+        self.encoder.load_state_dict(torch.load(load_path))
+        self.encoder.eval()     # layers are frozen by using .eval() method
+        for params in self.encoder.parameters():
+            params.requires_grad = False
+
+        self.decoder = UNetDecoder(init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
 
         self.train_ids_acdc = data_init_acdc.train_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DataloaderRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
+        self.train_dataset = DatasetRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
+        self.valid_dataset = DatasetRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
+        self.test_dataset = DatasetRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
 
-        self.loss = Loss(loss_type=0, encoder_strategy=None, device=self.device)
+        self.loss = Loss(loss_type=0, device=self.device)
         
     def forward(self, x):
-        return self.net(x)
+        enc_out, context_feats = self.encoder(x)
+        logits, out_final = self.decoder(enc_out, context_feats)
+        return out_final
 
     def compute_loss(self, batch):
         imgs, gts = batch
         imgs, gts = imgs.float(), gts.long()
-        logits, preds = self.net(imgs)
+        enc_out, context_feats = self.encoder(imgs)
+        logits, preds = self.decoder(enc_out, context_feats)
         # print(torch.unique(gts), gts.shape)
 
         gts_one_hot = self.loss.one_hot(gts, num_classes=self.cfg.num_classes)  # convert to one-hot for Dice loss
-        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, prediction=preds, target=gts_one_hot, multiclass=True)
+        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, partition_size=None, prediction=preds, target=gts_one_hot, multiclass=True)
         return loss, preds, imgs, gts        
     
     def training_step(self, batch, batch_nb):
@@ -202,7 +211,7 @@ def main(cfg):
                             name='%s <- %d'%(cfg.exp_name, timestamp), 
                             group= '%s'%(cfg.exp_name), 
                             log_model=True, # save best model using checkpoint callback
-                            project='supervised-train',
+                            project='supervised-finetune',
                             entity='ssl-medical-imaging',
                             config=cfg,
     )
