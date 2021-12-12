@@ -173,6 +173,27 @@ class Loss:
         loss = torch.mean(-torch.log((numerator_pos_1 + numerator_pos_2)/denominator))
         return loss
 
+    def loss_GDminus_alt(self, proj_feat0, proj_feat1, proj_feat2, partition_size=4, temperature=0.5):
+        """
+        Required args:
+            - proj_feat0 (2D torch Tensor): zero set of projected features (batch_size x feat_size) i.e. from the unaugmented image
+            - proj_feat1 (2D torch Tensor): first set of projected features (batch_size x feat_size)
+            - proj_feat2 (2D torch Tensor): second set of projected features (batch_size x feat_size)
+            - partition_size (int): the number of partitions of each input volume (default = 4)
+        Optional args:
+            - temperature (float): relaxation temperature. (default: 0.5)
+        Returns:
+            - loss (float): mean contrastive loss
+        """
+
+        loss0 = self.contrastive_loss_simclr(proj_feat0, proj_feat1)
+        loss1 = self.contrastive_loss_simclr(proj_feat0, proj_feat2)
+        loss2 = self.contrastive_loss_simclr(proj_feat1, proj_feat2)
+
+        total_loss = (loss0 + loss1 + loss2)/3
+
+        return total_loss
+
     def loss_GD(self, proj_feat0, proj_feat1, proj_feat2, partition_size=4, temperature=0.5):
         """
         Required args:
@@ -185,13 +206,13 @@ class Loss:
         Returns:
             - loss (float): mean contrastive loss
         """
-        # Normalize the individual representations  (TODO: there should be 4 latents)
+        # Normalize the individual representations
         batch_size = len(proj_feat1)
         z0 = F.normalize(proj_feat0, dim=1)     # projected features from the unaugmented image
         z1 = F.normalize(proj_feat1, dim=1)
         z2 = F.normalize(proj_feat2, dim=1)
 
-        # (vertical) stack one on top of the other  (TODO: change to 4)
+        # (vertical) stack one on top of the other
         representations = torch.cat([z0, z1, z2], dim=0)  # shape: (4*batch-size) x g1_out_dimension
 
         # get the full similarity matrix 
@@ -227,7 +248,8 @@ class Loss:
         # # shorter version
         # neg_sample_indicators = (~pos_sample_indicators.bool()).float() - torch.eye(N)
 
-        # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
+        # calculate the numerator by selecting the appropriate indices of the positive samples using the
+        # pos_sample_indicators matrix
         numerator_pos_1 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_1.bool()]
         numerator_pos_2 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_2.bool()]
         numerator_pos_3 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_3.bool()]                
@@ -245,6 +267,39 @@ class Loss:
         loss = (loss1+loss2+loss3)/3.0
         return loss
 
+    def compute(self, proj_feat0, proj_feat1, proj_feat2, partition_size,
+                prediction, target=None, multiclass=False):
+        if self.loss_type == 0:
+            prediction = prediction.to(self.device)
+            target = target.to(self.device)
+            return self.dice_loss_v2(prediction, target, multiclass)    # the new, "working" dice loss
+            # return self.dice_loss(prediction, target, multiclass)     # original, incorrect one
+        elif self.loss_type == 1:   # means global loss
+            if self.encoder_strategy == 'gr':
+                return self.contrastive_loss_simclr(proj_feat1, proj_feat2)
+            elif self.encoder_strategy == 'gd-':
+                return self.loss_GDminus(proj_feat0, proj_feat1, proj_feat2, partition_size)
+            elif self.encoder_strategy == 'gd-alt':
+                return self.loss_GDminus_alt(proj_feat0, proj_feat1, proj_feat2, partition_size)
+            elif self.encoder_strategy == 'gd':
+                return self.loss_GD(proj_feat0, proj_feat1, proj_feat2, partition_size)
+
+# testing with random inputs
+if __name__ == "__main__":
+    num_classes = 4
+    loss = Loss()
+    pred = torch.randn(8, num_classes, 192, 192)
+    pred_softmax = F.softmax(pred, dim=1)
+
+    target = torch.randint(low=0, high=4, size=(8, 1, 192, 192))
+    print(f"unique output: {torch.unique(target)}")
+    target_one_hot = loss.one_hot(target.long(), num_classes=num_classes)
+    print(target_one_hot.shape)
+
+    dice_loss = loss.compute(pred_softmax, target_one_hot, multiclass=True)
+    print(f"dice loss: {dice_loss}")
+
+"""
     def cos_sim(self, vect1, vect2):
         vect1_norm = F.normalize(vect1, dim=-1, p=2)
         vect2_norm = torch.transpose(F.normalize(vect2, dim=-1, p=2), -1, -2)
@@ -335,44 +390,4 @@ class Loss:
             loss += l1+l2
 
         return loss / m
-
-    def compute(self, proj_feat0, proj_feat1, proj_feat2, partition_size,
-                prediction, target=None, multiclass=False):
-        if self.loss_type == 0:
-            prediction = prediction.to(self.device)
-            target = target.to(self.device)
-            return self.dice_loss_v2(prediction, target, multiclass)    # the new, "working" dice loss
-            # return self.dice_loss(prediction, target, multiclass)     # original, incorrect one
-        elif self.loss_type == 1:   # means global loss
-            if self.encoder_strategy == 'gr':
-                return self.contrastive_loss_simclr(proj_feat1, proj_feat2)
-            elif self.encoder_strategy == 'gd-':
-                return self.loss_GDminus(proj_feat0, proj_feat1, proj_feat2, partition_size)
-            elif self.encoder_strategy == 'gd':
-                return self.loss_GD(proj_feat0, proj_feat1, proj_feat2, partition_size)
-
-# testing with random inputs
-if __name__ == "__main__":
-    num_classes = 4
-    loss = Loss()
-    pred = torch.randn(8, num_classes, 192, 192)
-    pred_softmax = F.softmax(pred, dim=1)
-
-    target = torch.randint(low=0, high=4, size=(8, 1, 192, 192))
-    print(f"unique output: {torch.unique(target)}")
-    target_one_hot = loss.one_hot(target.long(), num_classes=num_classes)
-    print(target_one_hot.shape)
-
-    dice_loss = loss.compute(pred_softmax, target_one_hot, multiclass=True)
-    print(f"dice loss: {dice_loss}")
-
-    # in_channels = 1
-    # num_filters = [1, 16, 32, 64, 128, 128]
-    # fc_units = [3200, 1024]
-    # g1_out_dim = 128
-    # num_classes = 3
-
-    # full_model = seg_models.SegUnetFullModel(in_channels, num_filters,fc_units, g1_out_dim, num_classes)
-    # logits, output = full_model(torch.randn(8, 1, 192, 192))
-    # print(logits.shape)
-    # print(f"output shape: {output.shape}")
+"""
