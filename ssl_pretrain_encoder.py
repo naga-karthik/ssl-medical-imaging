@@ -24,7 +24,7 @@ import torchvision.transforms as transforms
 # dataloaders and segmentation models
 from seg_models_v2 import UNetEncoder, ProjectorHead
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DatasetGR, DatasetGDMinus
+from Dataset.dataset import DatasetGR, DatasetGD
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
@@ -52,7 +52,7 @@ parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
 parser.add_argument('-ep', '--epochs', default=250, type=int, help='Number of epochs to train')
-parser.add_argument('-bs', '--batch_size', default=64, type=int, help='Batch size')
+parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
 parser.add_argument('-lr', '--learning_rate', default=1e-3, type=float, help="Learning rate to use")
@@ -77,7 +77,7 @@ class SegModel(pl.LightningModule):
         self.train_dataset = DatasetGR(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
         self.valid_dataset = DatasetGR(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
-        self.loss = Loss(loss_type=1, encoder_strategy=1, device=self.device)
+        self.loss = Loss(loss_type=1, encoder_strategy='gr', device=self.device)
         
     def forward(self, x):
         return self.net(x)
@@ -87,13 +87,15 @@ class SegModel(pl.LightningModule):
         img_aug1, img_aug2 = img_aug1.float(), img_aug2.float()
 
         # get the latent representations by passing each augmented image through the encoder
-        latent_reps_aug1 = self.encoder(img_aug1)
-        latent_reps_aug2 = self.encoder(img_aug2)
+        # latent_reps_aug1 = self.encoder(img_aug1)   # this is storing them as tuple; encoder has 2 outputs
+        # latent_reps_aug2 = self.encoder(img_aug2)
+        latent_reps_aug1, _ = self.encoder(img_aug1)
+        latent_reps_aug2, _ = self.encoder(img_aug2)
         # get the final z's for the contrastive loss by passing through the projector head
         z_aug1 = self.projector(latent_reps_aug1)
         z_aug2 = self.projector(latent_reps_aug2)
 
-        contrastive_loss = self.loss.compute(proj_feat1=z_aug1, proj_feat2=z_aug2, prediction=None)
+        contrastive_loss = self.loss.compute(proj_feat0=None, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=None, prediction=None)
 
         return contrastive_loss
     

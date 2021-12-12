@@ -1,3 +1,4 @@
+from operator import pos
 import torch
 from torch._C import device
 import torch.nn.functional as F
@@ -36,13 +37,11 @@ def multiclass_dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: boo
 
 '''
 Inputs:
-    loss_type: 0 for dice loss (default), 1 for global loss, 2 for local loss
-    encoder_strategy: 0 for random (default), 1 for Gr, 2 dor Gd-, 3 for Gd
-    decoder_strategy: 0 for random (default), 1 for Lr, 2 for Ld
+    loss_type: 0 for dice loss (default), 1 for global loss
+    encoder_strategy: 'gr' for Gr, 'gd-' for GD-, 'gd' for GD
 '''
 class Loss:
-    def __init__(self, loss_type=0, encoder_strategy=0, decoder_strategy=0, device='cpu'):
-        self.decoder_strategy = decoder_strategy
+    def __init__(self, loss_type=0, encoder_strategy='gr', device='cpu'):
         self.encoder_strategy = encoder_strategy
         self.loss_type = loss_type
         self.tau = 0.1
@@ -107,7 +106,63 @@ class Loss:
         neg_sample_indicators = (torch.ones(2*batch_size) - torch.eye(2*batch_size)).to(proj_feat1.device)
 
         # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
-        numerator = torch.exp(similarity_matrix/temperature)[pos_sample_indicators.bool()]
+        numerator = torch.exp(similarity_matrix/temperature)[pos_sample_indicators.bool()]      # shape: [2*batch_size]
+        # calculate the denominator by summing over each pair except for the diagonal elements
+        denominator = torch.sum((torch.exp(similarity_matrix/temperature)*neg_sample_indicators), dim=1)     # shape: [2*batch_size]
+
+        # clamp to avoid division by zero
+        if (denominator < 1e-8).any():
+            denominator = torch.clamp(denominator, 1e-8)
+
+        loss = torch.mean(-torch.log(numerator/denominator))
+        return loss
+
+    def loss_GDminus(self, proj_feat0, proj_feat1, proj_feat2, partition_size=4, temperature=0.5):
+        """
+        Required args:
+            - proj_feat0 (2D torch Tensor): zero set of projected features (batch_size x feat_size) i.e. from the unaugmented image
+            - proj_feat1 (2D torch Tensor): first set of projected features (batch_size x feat_size)
+            - proj_feat2 (2D torch Tensor): second set of projected features (batch_size x feat_size)
+            - partition_size (int): the number of partitions of each input volume (default = 4)
+        Optional args:
+            - temperature (float): relaxation temperature. (default: 0.5)
+        Returns:
+            - loss (float): mean contrastive loss
+        """
+        # Normalize the individual representations
+        batch_size = len(proj_feat1)
+        z0 = F.normalize(proj_feat0, dim=1)     # projected features from the unaugmented image
+        z1 = F.normalize(proj_feat1, dim=1)
+        z2 = F.normalize(proj_feat2, dim=1)
+        N = 3*batch_size
+        
+        # (vertical) stack one on top of the other
+        representations = torch.cat([z0, z1, z2], dim=0)  # shape: (3*batch-size) x g1_out_dimension
+
+        # get the full similarity matrix 
+        similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (3*batch-size) x (3*batch-size)
+
+        # for GD-, the positive sample indices are similar to GR (simclr)
+        # pos_sample_indicators = torch.roll(torch.eye(N), batch_size, 1) + torch.roll(torch.eye(N), 2*batch_size, 1)
+        pos_sample_indicators_1 = torch.roll(torch.eye(N), batch_size, 1).to(proj_feat1.device) 
+        pos_sample_indicators_2 = torch.roll(torch.eye(N), 2*batch_size, 1).to(proj_feat1.device)        
+        # pos_sample_indicators = pos_sample_indicators.to(proj_feat1.device)
+        # print(f"pos indicators shape: {pos_sample_indicators.shape}")
+        
+        # for the neg sample indices, we also need to consider the partition size here because we do not want to contrast against them
+        # so for each row in the neg indicator matrix, we have the diagonal zeros (by default) and now we also have 0s spaced out 
+        # according to the partition size as well (within each batch). This is replicated across the 3 batches
+        neg_sample_indicators = torch.ones((N, N))
+        for i in range(batch_size // partition_size):
+            neg_sample_indicators = neg_sample_indicators 
+            - torch.roll(torch.eye(N), i*partition_size, 1) 
+            - torch.roll(torch.eye(N), i*partition_size + batch_size, 1) 
+            - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+        neg_sample_indicators = neg_sample_indicators.to(proj_feat1.device)
+
+        # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
+        numerator_pos_1 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_1.bool()]      # shape: [3*batch-size]
+        numerator_pos_2 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_2.bool()]      # shape: [3*batch-size]        
         # calculate the denominator by summing over each pair except for the diagonal elements
         denominator = torch.sum((torch.exp(similarity_matrix/temperature)*neg_sample_indicators), dim=1)
 
@@ -115,7 +170,79 @@ class Loss:
         if (denominator < 1e-8).any():
             denominator = torch.clamp(denominator, 1e-8)
 
-        loss = torch.mean(-torch.log(numerator/denominator))
+        loss = torch.mean(-torch.log((numerator_pos_1 + numerator_pos_2)/denominator))
+        return loss
+
+    def loss_GD(self, proj_feat0, proj_feat1, proj_feat2, partition_size=4, temperature=0.5):
+        """
+        Required args:
+            - proj_feat0 (2D torch Tensor): zero set of projected features (batch_size x feat_size) i.e. from the unaugmented image
+            - proj_feat1 (2D torch Tensor): first set of projected features (batch_size x feat_size)
+            - proj_feat2 (2D torch Tensor): second set of projected features (batch_size x feat_size)
+            - partition_size (int): the number of partitions of each input volume (default = 4)
+        Optional args:
+            - temperature (float): relaxation temperature. (default: 0.5)
+        Returns:
+            - loss (float): mean contrastive loss
+        """
+        # Normalize the individual representations  (TODO: there should be 4 latents)
+        batch_size = len(proj_feat1)
+        z0 = F.normalize(proj_feat0, dim=1)     # projected features from the unaugmented image
+        z1 = F.normalize(proj_feat1, dim=1)
+        z2 = F.normalize(proj_feat2, dim=1)
+
+        # (vertical) stack one on top of the other  (TODO: change to 4)
+        representations = torch.cat([z0, z1, z2], dim=0)  # shape: (4*batch-size) x g1_out_dimension
+
+        # get the full similarity matrix 
+        similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (4*batch-size) x (4*batch-size)
+
+        # initialize arrays to set the indices of the positive and negative samples (shape: (4*batch-size) x (4*batch-size))
+        # here, the positive sample strategy is similar to neg samples in GD-, except where there are 0s in GD- (denoting samples to not 
+        # constrast against), they become 1s in GD for positives
+        N = 3*batch_size
+        pos_sample_indicators_1 = torch.zeros(N)
+        pos_sample_indicators_2 = torch.zeros(N)
+        pos_sample_indicators_3 = torch.zeros(N)
+        for i in range(batch_size // partition_size):
+            pos_sample_indicators_1 = (pos_sample_indicators_1 + torch.roll(torch.eye(N), i*partition_size, 1)).to(proj_feat1.device) 
+            pos_sample_indicators_2 = (pos_sample_indicators_2 + torch.roll(torch.eye(N), i*partition_size+batch_size, 1)).to(proj_feat1.device) 
+            pos_sample_indicators_3 = (pos_sample_indicators_3 + torch.roll(torch.eye(N), i*partition_size+2*batch_size, 1)).to(proj_feat1.device) 
+
+        # for i in range(batch_size // partition_size):
+        #     pos_sample_indicators = pos_sample_indicators 
+        #     + torch.roll(torch.eye(N), i*partition_size, 1) 
+        #     + torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
+        #     + torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+        # pos_sample_indicators = pos_sample_indicators.to(proj_feat1.device)
+        
+        # the negative sample indices remain unchanged from GD-'s negative sample indices
+        neg_sample_indicators = torch.ones(N)
+        for i in range(batch_size // partition_size):
+            neg_sample_indicators = neg_sample_indicators 
+            - torch.roll(torch.eye(N), i*partition_size, 1) 
+            - torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
+            - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+        neg_sample_indicators = neg_sample_indicators.to(proj_feat1.device)
+        # # shorter version
+        # neg_sample_indicators = (~pos_sample_indicators.bool()).float() - torch.eye(N)
+
+        # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
+        numerator_pos_1 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_1.bool()]
+        numerator_pos_2 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_2.bool()]
+        numerator_pos_3 = torch.exp(similarity_matrix/temperature)[pos_sample_indicators_3.bool()]                
+        # calculate the denominator by summing over each pair except for the diagonal elements
+        denominator = torch.sum((torch.exp(similarity_matrix/temperature)*neg_sample_indicators), dim=1)
+
+        # clamp to avoid division by zero
+        if (denominator < 1e-8).any():
+            denominator = torch.clamp(denominator, 1e-8)
+
+        # loss = torch.mean(-torch.log((numerator_pos_1 + numerator_pos_2 + numerator_pos_3)/denominator))
+        loss1 = torch.mean(-torch.log(numerator_pos_1/denominator))
+        loss2 = torch.mean(-torch.log(numerator_pos_2/denominator))
+        loss3 = torch.mean(-torch.log(numerator_pos_3/denominator))
+        loss = (loss1+loss2+loss3)/3.0
         return loss
 
     def cos_sim(self, vect1, vect2):
@@ -209,23 +336,20 @@ class Loss:
 
         return loss / m
 
-
-    def local_loss(self, prediction):
-        # TODO: local loss implementation (L_l)
-        pass
-
-    def compute(self, proj_feat1, proj_feat2, prediction, target=None, multiclass=False):
+    def compute(self, proj_feat0, proj_feat1, proj_feat2, partition_size,
+                prediction, target=None, multiclass=False):
         if self.loss_type == 0:
             prediction = prediction.to(self.device)
             target = target.to(self.device)
             return self.dice_loss_v2(prediction, target, multiclass)    # the new, "working" dice loss
             # return self.dice_loss(prediction, target, multiclass)     # original, incorrect one
-        if self.loss_type == 1:
-            # return self.global_loss(prediction)
-            return self.contrastive_loss_simclr(proj_feat1, proj_feat2)
-        elif self.loss_type == 2:
-            return self.local_loss(prediction)
-
+        elif self.loss_type == 1:   # means global loss
+            if self.encoder_strategy == 'gr':
+                return self.contrastive_loss_simclr(proj_feat1, proj_feat2)
+            elif self.encoder_strategy == 'gd-':
+                return self.loss_GDminus(proj_feat0, proj_feat1, proj_feat2, partition_size)
+            elif self.encoder_strategy == 'gd':
+                return self.loss_GD(proj_feat0, proj_feat1, proj_feat2, partition_size)
 
 # testing with random inputs
 if __name__ == "__main__":

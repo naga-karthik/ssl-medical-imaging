@@ -22,25 +22,22 @@ from torch.utils.data import DataLoader, dataloader
 import torchvision.transforms as transforms
 
 # dataloaders and segmentation models
-from seg_models_v2 import UNetEncoder, UNetDecoder
+from seg_models_v2 import UNetEncoder, ProjectorHead
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DatasetRandom       # note: for finetuning we always use DatasetRandom
+from Dataset.dataset import DatasetGR, DatasetGD
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
-# load paths for different pre-trained encoders (uncomment accordingly)
-# load_path = "./best_enc_model_GR.pt"    # for GR
-load_path = "./best_enc_model_GDminus.pt"    # for GD-
 
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='GDminus-R_Finetune-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='GDminus_Pretrain', type=str, help='Name of the experiment/run')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
-parser.add_argument('-nti', '--num_train_imgs', default='tr8', type=str, help='Number of training images, options tr1, tr8 or tr52')
+parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
 parser.add_argument('-cti', '--comb_train_imgs', default='c1', type=str, help='Combintation of Train imgs., options c1, c2, cr3, cr4, cr5')
 parser.add_argument('--img_path', default=img_path, type=str, help='Absolute path of the training data')
 parser.add_argument('--seg_path', default=seg_path, type=str, help='Same as path of training data')
@@ -52,9 +49,10 @@ parser.add_argument('-num_flt', '--init_num_filters', type=int, default=32, help
 parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024], help='List containing no. of units in FC layers')
 parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Output dimension for the projector head')
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
+parser.add_argument('-np', '--num_partitions', default=4, type=int, help='No. of partitions per volume')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
-parser.add_argument('-ep', '--epochs', default=100, type=int, help='Number of epochs to train')
+parser.add_argument('-ep', '--epochs', default=150, type=int, help='Number of epochs to train')
 parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
@@ -67,62 +65,68 @@ class SegModel(pl.LightningModule):
     def __init__(self, cfg):
         super(SegModel, self).__init__()
         self.cfg = cfg
-        # self.net = SegUnetFullModel(
-        #     in_channels=self.cfg.in_channels, 
-        #     num_filters_list=self.cfg.num_filters_list,
-        #     fc_units=self.cfg.fc_units_list,
-        #     g1_out_dim=self.cfg.g1_out_dim, 
-        #     num_classes=self.cfg.num_classes)
-        self.encoder = UNetEncoder(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters)
-        self.encoder.load_state_dict(torch.load(load_path))
-        self.encoder.eval()     # layers are frozen by using .eval() method
-        for params in self.encoder.parameters():
-            params.requires_grad = False
+        self.save_hyperparameters()
 
-        self.decoder = UNetDecoder(init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
+        # self.net = UNet(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters, n_classes=self.cfg.num_classes)
+        self.encoder = UNetEncoder(n_channels=self.cfg.in_channels, init_filters=self.cfg.init_num_filters)
+        self.projector = ProjectorHead(encoder_init_filters=self.cfg.init_num_filters, out_dim=self.cfg.g1_out_dim)
 
         self.train_ids_acdc = data_init_acdc.train_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
-        self.test_ids_acdc = data_init_acdc.test_data()
+        # self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DatasetRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.valid_dataset = DatasetRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.test_dataset = DatasetRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
+        self.train_dataset = DatasetGD(self.cfg.dataset, self.train_ids_acdc, self.cfg.num_partitions, self.cfg.img_path, preprocessed_data=True, seg_path=None)
+        self.valid_dataset = DatasetGD(self.cfg.dataset, self.val_ids_acdc, self.cfg.num_partitions, self.cfg.img_path, preprocessed_data=True, seg_path=None)
 
-        self.loss = Loss(loss_type=0, device=self.device)
+        self.loss = Loss(loss_type=1, encoder_strategy='gd-', device=self.device)
         
     def forward(self, x):
-        enc_out, context_feats = self.encoder(x)
-        logits, out_final = self.decoder(enc_out, context_feats)
-        return out_final
+        return self.net(x)
 
     def compute_loss(self, batch):
-        imgs, gts = batch
-        imgs, gts = imgs.float(), gts.long()
-        enc_out, context_feats = self.encoder(imgs)
-        logits, preds = self.decoder(enc_out, context_feats)
-        # print(torch.unique(gts), gts.shape)
+        orig_img, img_aug1, img_aug2 = batch    # size of each is batch_size, partition_num, 1, 192, 192 
+        orig_img, img_aug1, img_aug2 = orig_img.float(), img_aug1.float(), img_aug2.float()
+        b, p, h, w = orig_img.squeeze().shape
 
-        gts_one_hot = self.loss.one_hot(gts, num_classes=self.cfg.num_classes)  # convert to one-hot for Dice loss
-        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, partition_size=None, prediction=preds, target=gts_one_hot, multiclass=True)
-        return loss, preds, imgs, gts        
+        # flattened so that batch_size and the partition_num are clubbed and the in_channels remain the same
+        orig_img = orig_img.view(b*p, 1, h, w)  # so the batch_size dimension essentially becomes b-s*partition
+        img_aug1 = img_aug1.view(b*p, 1, h, w)
+        img_aug2 = img_aug2.view(b*p, 1, h, w)
+
+        # get the latent representations by passing each augmented image through the encoder
+        latent_reps_unaug, context_feats_unaug = self.encoder(orig_img)
+        latent_reps_aug1, context_feats_aug1 = self.encoder(img_aug1)
+        latent_reps_aug2, context_feats_aug2 = self.encoder(img_aug2)
+        # get the final z's for the contrastive loss by passing through the projector head
+        z_aug0 = self.projector(latent_reps_unaug)
+        z_aug1 = self.projector(latent_reps_aug1)
+        z_aug2 = self.projector(latent_reps_aug2)
+
+        contrastive_loss = self.loss.compute(
+            proj_feat0=z_aug0, 
+            proj_feat1=z_aug1, 
+            proj_feat2=z_aug2, 
+            partition_size=p,
+            prediction=None)
+
+        return contrastive_loss
     
     def training_step(self, batch, batch_nb):
-        loss, preds, imgs, gts = self.compute_loss(batch)
-        self.log('train_loss', loss, on_step=False, on_epoch=True)
+        loss = self.compute_loss(batch)
+        self.log('train_contrastive_loss', loss, on_step=False, on_epoch=True)
 
-        if batch_nb == 0: # once per epoch
-            fig = visualize(preds, imgs, gts)
-            wandb.log({"Training Output Visualizations": fig})
+        # if batch_nb == 0: # once per epoch
+        #     fig = visualize(preds, imgs, gts)
+        #     wandb.log({"Training Output Visualizations": fig})
         return loss
 
     def validation_step(self, batch, batch_nb):
-        loss, preds, imgs, gts = self.compute_loss(batch)
-        self.log('valid_loss', loss, on_step=False, on_epoch=True)
+        loss = self.compute_loss(batch)
+        self.log('valid_contrastive_loss', loss, on_step=False, on_epoch=True)
 
-        if batch_nb == 0: # once per epoch
-            fig = visualize(preds, imgs, gts)
-            wandb.log({"Validation Output Visualizations": fig})
+        # if batch_nb == 0: # once per epoch
+        #     fig = visualize(preds, imgs, gts)
+        #     wandb.log({"Validation Output Visualizations": fig})
     
     def test_step(self, batch, batch_nb):
         loss, preds, imgs, gts = self.compute_loss(batch)
@@ -166,9 +170,9 @@ class SegModel(pl.LightningModule):
         return DataLoader(self.valid_dataset, batch_size = self.cfg.batch_size,
                              shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
     
-    def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
-                             shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
+    # def test_dataloader(self):
+    #     return DataLoader(self.test_dataset, batch_size = self.cfg.batch_size,
+    #                          shuffle = False, drop_last=False, num_workers=self.cfg.num_workers)
 
 def visualize(preds, imgs, gts, num_imgs=10):
     main_colors = torch.tensor([
@@ -211,7 +215,7 @@ def main(cfg):
                             name='%s <- %d'%(cfg.exp_name, timestamp), 
                             group= '%s'%(cfg.exp_name), 
                             log_model=True, # save best model using checkpoint callback
-                            project='supervised-finetune',
+                            project='self-supervised-pretrain',
                             entity='ssl-medical-imaging',
                             config=cfg,
     )
@@ -219,7 +223,7 @@ def main(cfg):
     # to save the best model on validation
     checkpoint = pl.callbacks.ModelCheckpoint(
         filename="best_model"+str(timestamp),
-        monitor="valid_loss",
+        monitor="valid_contrastive_loss",
         save_top_k=1,
         mode="max",
         save_last=False,
@@ -242,8 +246,27 @@ def main(cfg):
     trainer.fit(model)
     print("------- Training Done! -------")
 
-    print("------- Testing Begins! -------")
-    trainer.test(model)
+    # print("------- Saving the Best Model! -------")
+    # torch.save(model.state_dict(), save_path)
+
+    # print("------- Loading the Best Model! ------")     # the standard PyTorch Way
+    # # load the best checkpoint after training
+    # loaded_model = model.load_state_dict(torch.load(save_path), strict=False) # .load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
+    # pretrained_encoder = loaded_model.encoder
+    # pretrained_encoder.eval()
+    # print(f"Pretrained Encoder model: \n{pretrained_encoder} ")
+
+    save_path = "./best_enc_model_GDminus.pt"    # current folder    
+    print("------- Loading the Best Model! ------")     # the PyTorch Lightning way
+    # load the best checkpoint after training
+    loaded_model = model.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, strict=False)
+    pretrained_encoder = loaded_model.encoder
+    # pretrained_encoder.eval()
+    # print(f"Pretrained Encoder model: \n{pretrained_encoder} ")    
+    torch.save(pretrained_encoder.state_dict(), save_path)
+
+    # print("------- Testing Begins! -------")
+    # trainer.test(model)
 
 if __name__ == '__main__':
     main(cfg)

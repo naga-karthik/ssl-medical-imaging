@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.nn.modules.activation import ReLU
-
+import loss
 
 def conv_bnorm_relu(in_feats, out_feats):
     return nn.Sequential(
@@ -251,6 +251,7 @@ if __name__ == "__main__":
     full_model = SegUnetFullModel(in_channels, num_filters, fc_units, g1_out_dim, num_classes)
     logits, out_final = full_model(input_img)
     print(f"full model logits shape: {logits.shape}")
+
 
 
 
