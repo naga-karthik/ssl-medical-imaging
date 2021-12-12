@@ -3,3 +3,5 @@ torchvision==0.9.0+cu111
 torchtext==0.9.0
 pytorch-lightning==1.5.3
 wandb==0.12.7
+SimpleITK==2.1.1
+albumentations==1.1.0
