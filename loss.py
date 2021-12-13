@@ -51,6 +51,12 @@ class Loss:
         assert input.size() == target.size()
         fn = multiclass_dice_coeff if multiclass else dice_coeff
         return 1 - fn(input, target, reduce_batch_first=True)
+    
+    def one_hot(self, arr, num_classes):
+        # converting arr into a LongTensor so that it can be used as indices
+        arr = arr.squeeze()
+        one_hot_encoded = torch.eye(num_classes)[arr]   # shape: [batch_size, 192, 192, num_classes]
+        return one_hot_encoded.permute(0, 3, 1, 2)      # shape: [batch_size, num_classes, 192, 192]
 
     def loss_GR(self, proj_feat1, proj_feat2):
         """
