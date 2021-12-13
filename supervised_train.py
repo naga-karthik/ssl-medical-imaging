@@ -1,5 +1,4 @@
 # utility packages
-from functools import cmp_to_key
 import os
 import time
 import argparse
@@ -24,7 +23,7 @@ import torchvision.transforms as transforms
 # dataloaders and segmentation models
 from seg_models_v2 import UNet
 from Dataset.init_data import acdc, md_prostate
-from Dataset.dataset import DataloaderRandom
+from Dataset.dataset import DatasetRandom
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
@@ -79,9 +78,9 @@ class SegModel(pl.LightningModule):
         self.val_ids_acdc = data_init_acdc.val_data(self.cfg.num_train_imgs, self.cfg.comb_train_imgs)
         self.test_ids_acdc = data_init_acdc.test_data()
 
-        self.train_dataset = DataloaderRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.valid_dataset = DataloaderRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
-        self.test_dataset = DataloaderRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
+        self.train_dataset = DatasetRandom(self.cfg.dataset, self.train_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
+        self.valid_dataset = DatasetRandom(self.cfg.dataset, self.val_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=True)
+        self.test_dataset = DatasetRandom(self.cfg.dataset, self.test_ids_acdc, self.cfg.img_path, preprocessed_data=True, seg_path=self.cfg.seg_path, augmentation=False)
 
         self.loss = Loss(loss_type=0, encoder_strategy=None, device=self.device)
         
@@ -95,7 +94,7 @@ class SegModel(pl.LightningModule):
         # print(torch.unique(gts), gts.shape)
 
         gts_one_hot = self.loss.one_hot(gts, num_classes=self.cfg.num_classes)  # convert to one-hot for Dice loss
-        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, prediction=preds, target=gts_one_hot, multiclass=True)
+        loss = self.loss.compute(proj_feat0=None, proj_feat1=None, proj_feat2=None, partition_size=None, prediction=preds, target=gts_one_hot, multiclass=True)
         return loss, preds, imgs, gts        
     
     def training_step(self, batch, batch_nb):
@@ -138,16 +137,10 @@ class SegModel(pl.LightningModule):
         return {'test_dice_score' : test_dice_score}
 
     def configure_optimizers(self):
-        # opt_params = { 'lr': 1e-4, 'weight_decay': 0, }
-        # scheduler_params={ 'T_0': 40, 'eta_min': 1e-5 }
-        # optimizer = eval(self.cfg.opt)(self.parameters(), **self.cfg.opt_params)
-        # scheduler = eval(self.cfg.scheduler)(optimizer, **self.cfg.scheduler_params)
-
         optimizer = optim.Adam(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, eta_min=1e-5)
         
         return [optimizer], [scheduler]
-        # return [optimizer]
     
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,
