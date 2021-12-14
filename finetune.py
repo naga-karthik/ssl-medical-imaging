@@ -1,5 +1,4 @@
 # utility packages
-from functools import cmp_to_key
 import os
 import time
 import argparse
@@ -31,15 +30,17 @@ from loss import Loss, multiclass_dice_coeff
 img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 # load paths for different pre-trained encoders (uncomment accordingly)
-# load_path = "./best_enc_model_GR.pt"    # for GR
-load_path = "./best_enc_model_GDminus.pt"    # for GD-
+load_path = "./best_enc_model_GR.pt"    # for GR
+# load_path = "./best_enc_model_GDminus.pt"    # for GD-
 
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='GDminus-R_Finetune-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='GR-R_Finetune-tr8', type=str, help='Name of the experiment/run')
+parser.add_argument('-st', '--strategy', default='GR', type=str, help='Strategy for pretraining; Options: GR, GD-, GD, GD-alt')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
+parser.add_argument('--dataset_name', default='acdc', type=str, help='acdc or md_prostate dataset')
 parser.add_argument('-nti', '--num_train_imgs', default='tr8', type=str, help='Number of training images, options tr1, tr8 or tr52')
 parser.add_argument('-cti', '--comb_train_imgs', default='c1', type=str, help='Combintation of Train imgs., options c1, c2, cr3, cr4, cr5')
 parser.add_argument('--img_path', default=img_path, type=str, help='Absolute path of the training data')
@@ -147,16 +148,10 @@ class SegModel(pl.LightningModule):
         return {'test_dice_score' : test_dice_score}
 
     def configure_optimizers(self):
-        # opt_params = { 'lr': 1e-4, 'weight_decay': 0, }
-        # scheduler_params={ 'T_0': 40, 'eta_min': 1e-5 }
-        # optimizer = eval(self.cfg.opt)(self.parameters(), **self.cfg.opt_params)
-        # scheduler = eval(self.cfg.scheduler)(optimizer, **self.cfg.scheduler_params)
-
         optimizer = optim.Adam(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, eta_min=1e-5)
         
         return [optimizer], [scheduler]
-        # return [optimizer]
     
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size = self.cfg.batch_size,
@@ -208,7 +203,11 @@ def visualize(preds, imgs, gts, num_imgs=10):
 def main(cfg):
     # experiment tracker (you need to sign in with your account)
     wandb_logger = pl.loggers.WandbLogger(
-                            name='%s <- %d'%(cfg.exp_name, timestamp), 
+                            name='%s <- %d'%(
+                                cfg.dataset_name + "_" + 
+                                cfg.strategy + "_" + 
+                                cfg.comb_train_imgs + "epch_" + 
+                                str(cfg.epochs), timestamp), 
                             group= '%s'%(cfg.exp_name), 
                             log_model=True, # save best model using checkpoint callback
                             project='supervised-finetune',

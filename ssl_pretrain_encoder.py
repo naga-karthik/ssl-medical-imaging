@@ -33,9 +33,11 @@ seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
 # all the arguments for the dataset, model, and training hyperparameters
-parser.add_argument('--exp_name', default='Pretrain-refactor-test', type=str, help='Name of the experiment/run')
+parser.add_argument('--exp_name', default='Pretraining', type=str, help='Name of the experiment/run')
+parser.add_argument('-st', '--strategy', default='GR', type=str, help='Strategy for pretraining; Options: GR, GD-, GD, GD-alt')
 # dataset
 parser.add_argument('-data', '--dataset', default=acdc, help='Specifyg acdc or md_prostate without quotes')
+parser.add_argument('--dataset_name', default='acdc', type=str, help='acdc or md_prostate dataset')
 parser.add_argument('-nti', '--num_train_imgs', default='tr52', type=str, help='Number of training images, options tr1, tr8 or tr52')
 parser.add_argument('-cti', '--comb_train_imgs', default='c1', type=str, help='Combintation of Train imgs., options c1, c2, cr3, cr4, cr5')
 parser.add_argument('--img_path', default=img_path, type=str, help='Absolute path of the training data')
@@ -49,10 +51,9 @@ parser.add_argument('-num_fc', '--fc_units_list', nargs='+', default=[3200, 1024
 parser.add_argument('-g1_dim', '--g1_out_dim', default=128, type=int, help='Output dimension for the projector head')
 parser.add_argument('-nc', '--num_classes', default=4, type=int, help='Number of classes to segment')
 parser.add_argument('-np', '--num_partitions', default=4, type=int, help='No. of partitions per volume')
-parser.add_argument('-st', '--strategy', default='GR', type=str, help='Strategy for pretraining; Options: GR, GD-, GD, GD-alt')
 # optimization
 parser.add_argument('-p', '--precision', default=32, type=int, help='Precision for training')
-parser.add_argument('-ep', '--epochs', default=10, type=int, help='Number of epochs to train')
+parser.add_argument('-ep', '--epochs', default=150, type=int, help='Number of epochs to train')
 parser.add_argument('-bs', '--batch_size', default=32, type=int, help='Batch size')
 parser.add_argument('-nw', '--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('-gpus', '--num_gpus', default=1, type=int, help="Number of GPUs to use")
@@ -134,7 +135,7 @@ class SegModel(pl.LightningModule):
             if strategy == 'GD-':
                 contrastive_loss = self.loss.compute(proj_feat0=z_aug0, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=p, prediction=None)
             elif strategy == 'GD-alt':
-                contrastive_loss = self.loss.compute(proj_feat0=z_aug0, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=None, prediction=None)
+                contrastive_loss = self.loss.compute(proj_feat0=z_aug0, proj_feat1=z_aug1, proj_feat2=z_aug2, partition_size=p, prediction=None)
             return contrastive_loss
 
         elif strategy == 'GD':
@@ -235,7 +236,11 @@ def visualize(preds, imgs, gts, num_imgs=10):
 def main(cfg):
     # experiment tracker (you need to sign in with your account)
     wandb_logger = pl.loggers.WandbLogger(
-                            name='%s <- %d'%(cfg.exp_name, timestamp), 
+                            name='%s <- %d'%(
+                                cfg.dataset_name + "_" + 
+                                cfg.strategy + "_" + 
+                                cfg.comb_train_imgs + "_epch" + 
+                                str(cfg.epochs), timestamp), 
                             group= '%s'%(cfg.exp_name), 
                             log_model=True, # save best model using checkpoint callback
                             project='self-supervised-pretrain',
