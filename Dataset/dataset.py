@@ -253,8 +253,9 @@ class DatasetGD(DatasetGeneric):
         slices = slices[:-self.padding_list[idx]]
         no_all_slices = slices.shape[0]
 
-        slice_per_partion = no_all_slices // self.partition
+        slice_per_partion = np.int(np.ceil(no_all_slices / self.partition))
         rand_ints = np.random.randint(low=0, high=slice_per_partion, size=self.partition)
+        rand_ints[-1] = np.random.randint(low=0, high=slice_per_partion*self.partition - no_all_slices)
 
         partition_starts = np.arange(self.partition) * slice_per_partion
         rand_indxs = np.asarray(partition_starts + rand_ints)
