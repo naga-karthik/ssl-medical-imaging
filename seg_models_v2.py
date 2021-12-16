@@ -89,28 +89,52 @@ class UNet(nn.Module):
         self.n_classes = n_classes
         self.bilinear = bilinear
 
+        # self.inc = DoubleConv(n_channels, init_filters)
+        # self.down1 = Down(init_filters, init_filters*2)
+        # self.down2 = Down(init_filters*2, init_filters*4)
+        # self.down3 = Down(init_filters*4, init_filters*8)
+        # factor = 2 if bilinear else 1
+        # self.down4 = Down(init_filters*8, init_filters*16 // factor)
+        # self.up1 = Up(init_filters*16, init_filters*8 // factor, bilinear)
+        # self.up2 = Up(init_filters*8, init_filters*4 // factor, bilinear)
+        # self.up3 = Up(init_filters*4, init_filters*2 // factor, bilinear)
+        # self.up4 = Up(init_filters*2, init_filters, bilinear)
+        # self.outc = OutConv(init_filters, n_classes)
         self.inc = DoubleConv(n_channels, init_filters)
         self.down1 = Down(init_filters, init_filters*2)
         self.down2 = Down(init_filters*2, init_filters*4)
         self.down3 = Down(init_filters*4, init_filters*8)
+        self.down4 = Down(init_filters*8, init_filters*16)
         factor = 2 if bilinear else 1
-        self.down4 = Down(init_filters*8, init_filters*16 // factor)
-        self.up1 = Up(init_filters*16, init_filters*8 // factor, bilinear)
-        self.up2 = Up(init_filters*8, init_filters*4 // factor, bilinear)
-        self.up3 = Up(init_filters*4, init_filters*2 // factor, bilinear)
-        self.up4 = Up(init_filters*2, init_filters, bilinear)
+        self.down5 = Down(init_filters*16, init_filters*32 // factor)
+        self.up1 = Up(init_filters*32, init_filters*16 // factor, bilinear)
+        self.up2 = Up(init_filters*16, init_filters*8 // factor, bilinear)
+        self.up3 = Up(init_filters*8, init_filters*4 // factor, bilinear)
+        self.up4 = Up(init_filters*4, init_filters*2 // factor, bilinear)
+        self.up5 = Up(init_filters*2, init_filters, bilinear)
         self.outc = OutConv(init_filters, n_classes)
 
     def forward(self, x):
+        # x1 = self.inc(x)
+        # x2 = self.down1(x1)
+        # x3 = self.down2(x2)
+        # x4 = self.down3(x3)
+        # x5 = self.down4(x4)
+        # x = self.up1(x5, x4)
+        # x = self.up2(x, x3)
+        # x = self.up3(x, x2)
+        # x = self.up4(x, x1)
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
         x4 = self.down3(x3)
         x5 = self.down4(x4)
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
+        x6 = self.down5(x5)
+        x = self.up1(x6, x5)
+        x = self.up2(x, x4)
+        x = self.up3(x, x3)
+        x = self.up4(x, x2)
+        x = self.up5(x, x1)
         logits = self.outc(x)
         out_final = F.softmax(logits, dim=1)
         return logits, out_final
@@ -126,12 +150,19 @@ class UNetEncoder(nn.Module):
         self.init_filters = init_filters
         self.bilinear = bilinear
 
+        # self.inc = DoubleConv(n_channels, init_filters)
+        # self.down1 = Down(init_filters, init_filters*2)
+        # self.down2 = Down(init_filters*2, init_filters*4)
+        # self.down3 = Down(init_filters*4, init_filters*8)
+        # factor = 2 if bilinear else 1
+        # self.down4 = Down(init_filters*8, init_filters*16 // factor)
         self.inc = DoubleConv(n_channels, init_filters)
         self.down1 = Down(init_filters, init_filters*2)
         self.down2 = Down(init_filters*2, init_filters*4)
         self.down3 = Down(init_filters*4, init_filters*8)
+        self.down4 = Down(init_filters*8, init_filters*16)
         factor = 2 if bilinear else 1
-        self.down4 = Down(init_filters*8, init_filters*16 // factor)
+        self.down5 = Down(init_filters*16, init_filters*32 // factor)
 
     def forward(self, x):
         context_features = []
@@ -144,9 +175,10 @@ class UNetEncoder(nn.Module):
         x4 = self.down3(x3)
         context_features.append(x4)
         x5 = self.down4(x4)
-
-        return x5, context_features
-
+        # return x5, context_features
+        context_features.append(x5)
+        x6 = self.down5(x5)
+        return x6, context_features
 
 # #############################################################################
 # ---------------------------- UNet Decoder Model -----------------------------
@@ -158,19 +190,33 @@ class UNetDecoder(nn.Module):
         self.n_classes = n_classes
         self.bilinear = bilinear
 
+        # factor = 2 if bilinear else 1
+        # self.up1 = Up(init_filters*16, init_filters*8 // factor, bilinear)
+        # self.up2 = Up(init_filters*8, init_filters*4 // factor, bilinear)
+        # self.up3 = Up(init_filters*4, init_filters*2 // factor, bilinear)
+        # self.up4 = Up(init_filters*2, init_filters, bilinear)
+        # self.outc = OutConv(init_filters, n_classes)
         factor = 2 if bilinear else 1
-        self.up1 = Up(init_filters*16, init_filters*8 // factor, bilinear)
-        self.up2 = Up(init_filters*8, init_filters*4 // factor, bilinear)
-        self.up3 = Up(init_filters*4, init_filters*2 // factor, bilinear)
-        self.up4 = Up(init_filters*2, init_filters, bilinear)
+        self.up1 = Up(init_filters*32, init_filters*16 // factor, bilinear)
+        self.up2 = Up(init_filters*16, init_filters*8 // factor, bilinear)
+        self.up3 = Up(init_filters*8, init_filters*4 // factor, bilinear)
+        self.up4 = Up(init_filters*4, init_filters*2 // factor, bilinear)
+        self.up5 = Up(init_filters*2, init_filters, bilinear)
         self.outc = OutConv(init_filters, n_classes)
     
     def forward(self, enc_out, context_features):
-        x1, x2, x3, x4 = context_features   # getting these from the encoder     
-        x = self.up1(enc_out, x4)   # enc_out is x5 in the full UNet model
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
+        # x1, x2, x3, x4 = context_features   # getting these from the encoder     
+        # x = self.up1(enc_out, x4)   # enc_out is x5 in the full UNet model
+        # x = self.up2(x, x3)
+        # x = self.up3(x, x2)
+        # x = self.up4(x, x1)
+        x1, x2, x3, x4, x5 = context_features   # getting these from the encoder     
+        x = self.up1(enc_out, x5)   # enc_out is x6 in the full UNet model
+        x = self.up2(x, x4)  
+        x = self.up3(x, x3)
+        x = self.up4(x, x2)
+        x = self.up5(x, x1)
+
         logits = self.outc(x)
         out_final = F.softmax(logits, dim=1)
         return logits, out_final
@@ -183,14 +229,18 @@ class ProjectorHead(nn.Module):
     def __init__(self, encoder_init_filters, out_dim):
         super(ProjectorHead, self).__init__()
         self.out_dim = out_dim
+        # self.projector_g1 = nn.Sequential(
+        #     nn.Linear(((encoder_init_filters*16)//2)*(12*12), 3200),    # final enc output is 12x12 (ie downsampled to 12x12), which is then multiplied by 128 filters for flattening
+        #     nn.ReLU(),
+        #     nn.Linear(3200, 1024),
+        #     nn.ReLU(),
+        #     nn.Linear(1024, out_dim)
+        # )
         self.projector_g1 = nn.Sequential(
-            nn.Linear(((encoder_init_filters*16)//2)*(12*12), 3200),    # final enc output is 12x12 (ie downsampled to 12x12), which is then multiplied by 128 filters for flattening
-            nn.ReLU(),
-            nn.Linear(3200, 1024),
+            nn.Linear(((encoder_init_filters*32)//2)*(6*6), 1024),    # final enc output is 12x12 (ie downsampled to 12x12), which is then multiplied by 128 filters for flattening
             nn.ReLU(),
             nn.Linear(1024, out_dim)
         )
-
     def forward(self, encoder_out):
         out = torch.flatten(encoder_out, 1)
         projector_out = self.projector_g1(out)
@@ -206,8 +256,8 @@ if __name__ == "__main__":
     # print(f"logits shape: {logits.shape}")
     # print(f"final output shape: {out_final.shape}")
 
-    encoder_model = UNetEncoder(n_channels=1, init_filters=16)
-    enc_out = encoder_model(input)
+    encoder_model  = UNetEncoder(n_channels=1, init_filters=16)
+    enc_out, feats = encoder_model(input)
     print(f"enc out shape: {enc_out.shape}")
     proj_head = ProjectorHead(encoder_init_filters=16, out_dim=128)
     proj_out = proj_head(enc_out)
