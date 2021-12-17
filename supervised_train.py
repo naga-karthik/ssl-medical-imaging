@@ -45,11 +45,13 @@ parser.add_argument('--epochs', default=10000, type=int, help='Number of epochs 
 parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('--num_workers', default=4, type=int, help='Number of worker processes')
 parser.add_argument('--num_gpus', default=1, type=int, help="Number of GPUs to use")
-parser.add_argument('--learning_rate', default=1e-3, type=float, help="Learning rate to use")
+parser.add_argument('--learning_rate', default=5e-4, type=float, help="Learning rate to use")
 parser.add_argument('--weight_decay', default=1e-3, type=float, help='Default weight decay')
-parser.add_argument('--patience', default=100, type=int, help='number of epochs to wait before early stoping')
+parser.add_argument('--patience', default=20, type=int, help='number of validation steps (val_every_n_iters) to wait before early stoping')
+parser.add_argument('--T_0', default=500, type=int, help='number of steps in each cosine cycle')
 parser.add_argument('--enable_progress_bar', default=False, type=bool, help='by default is disabled since it doesnt work in colab')
 parser.add_argument('--checkpoint_path', default='random-init', type=str, help='full path for the checkpoint in case would like to finetune')
+parser.add_argument('--val_every_n_iters', default='100', type=int, help='num of iterations before validation')
 
 cfg = parser.parse_args()
 
@@ -94,6 +96,7 @@ class SegModel(pl.LightningModule):
         self.valid_losses = []
         self.test_losses = []
         self.init_timestamp = time.time()
+        self.num_iters_per_epoch = np.int(np.ceil(len(self.train_dataset) / self.cfg.batch_size))
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size = self.cfg.batch_size, drop_last=False,
@@ -123,7 +126,7 @@ class SegModel(pl.LightningModule):
     
     def training_step(self, batch, batch_nb):
         loss, preds, imgs, gts = self.compute_loss(batch)
-        self.train_losses += [loss.item()] * len(batch)
+        self.train_losses += [loss.item()] * len(imgs)
 
         if loss < self.best_train_loss - self.loss_visualization_step and batch_nb==0:
           self.best_train_loss = loss.item()
@@ -135,7 +138,7 @@ class SegModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_nb):
         loss, preds, imgs, gts = self.compute_loss(batch, exclude_background=True)
-        self.valid_losses += [loss.item()] * len(batch)
+        self.valid_losses += [loss.item()] * len(imgs)
 
         # qualitative results on wandb when first batch dice improves by 10%
         if loss < self.best_valid_loss - self.loss_visualization_step and batch_nb==0:
@@ -146,7 +149,7 @@ class SegModel(pl.LightningModule):
             
     def test_step(self, batch, batch_nb):
         loss, preds, imgs, gts = self.compute_loss(batch, exclude_background=True)
-        self.test_losses += [loss.item()] * len(batch)
+        self.test_losses += [loss.item()] * len(imgs)
 
         # qualitative results on wandb
         fig = visualize(preds, imgs, gts)
@@ -172,7 +175,8 @@ class SegModel(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(params=self.parameters(), lr=self.cfg.learning_rate, weight_decay=self.cfg.weight_decay)
-        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, eta_min=1e-6)
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,
+                          T_0=self.cfg.T_0//self.num_iters_per_epoch, eta_min=1e-6)
         return [optimizer], [scheduler]
 
 def visualize(preds, imgs, gts):
@@ -235,12 +239,13 @@ def main(cfg):
       
     # log gradients, parameter histogram and model topology
     wandb_logger.watch(model, log='all')
-
+    
     trainer = pl.Trainer(
-        devices=cfg.num_gpus, accelerator="gpu", strategy="ddp",
-        logger=wandb_logger, callbacks=[checkpoint, lr_monitor, early_stop],
-        max_epochs=cfg.epochs, precision=cfg.precision,
-        enable_progress_bar=cfg.enable_progress_bar)
+                        devices=cfg.num_gpus, accelerator="gpu", strategy="ddp",
+                        logger=wandb_logger, callbacks=[checkpoint, lr_monitor, early_stop],
+                        max_epochs=cfg.epochs, precision=cfg.precision,
+                        enable_progress_bar=cfg.enable_progress_bar,
+                        check_val_every_n_epoch=(cfg.val_every_n_iters//model.num_iters_per_epoch))
     
     trainer.fit(model)
     print("------- Training Done! -------")
