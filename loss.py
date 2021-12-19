@@ -120,36 +120,6 @@ class Loss:
         # get the full similarity matrix 
         similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (3*batch-size) x (3*batch-size)
 
-        # # METHOD 1
-        # # for GD-, the positive sample indices are similar to GR (simclr)
-        # # pos_sample_indicators = torch.roll(torch.eye(N), batch_size, 1) + torch.roll(torch.eye(N), 2*batch_size, 1)
-        # pos_sample_indicators_1 = torch.roll(torch.eye(N), batch_size, 1).to(proj_feat1.device) 
-        # pos_sample_indicators_2 = torch.roll(torch.eye(N), 2*batch_size, 1).to(proj_feat1.device)        
-        # # print(f"pos indicators shape: {pos_sample_indicators.shape}")
-        
-        # # for the neg sample indices, we also need to consider the partition size here because we do not want to contrast against them
-        # # so for each row in the neg indicator matrix, we have the diagonal zeros (by default) and now we also have 0s spaced out 
-        # # according to the partition size as well (within each batch). This is replicated across the 3 batches
-        # neg_sample_indicators = torch.ones((N, N))
-        # for i in range(batch_size // partition_size):
-        #     neg_sample_indicators = neg_sample_indicators \
-        #         - torch.roll(torch.eye(N), i*partition_size, 1) \
-        #         - torch.roll(torch.eye(N), i*partition_size + batch_size, 1) \
-        #         - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
-        # neg_sample_indicators = neg_sample_indicators.to(proj_feat1.device)
-
-        # # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
-        # numerator_pos_1 = torch.exp(similarity_matrix/self.tau)[pos_sample_indicators_1.bool()]      # shape: [3*batch-size]
-        # numerator_pos_2 = torch.exp(similarity_matrix/self.tau)[pos_sample_indicators_2.bool()]      # shape: [3*batch-size]        
-        # # calculate the denominator by summing over each pair except for the diagonal elements
-        # denominator = torch.sum((torch.exp(similarity_matrix/self.tau)*neg_sample_indicators), dim=1)
-
-        # # clamp to avoid division by zero
-        # if (denominator < 1e-8).any():
-        #     denominator = torch.clamp(denominator, 1e-8)
-
-        # loss = torch.mean(-torch.log((numerator_pos_1*numerator_pos_2)/denominator))
-
         # METHOD 2
         pos_sample_indicators_1 = torch.roll(torch.eye(N), batch_size, 1).to(proj_feat1.device) 
         pos_sample_indicators_2 = torch.roll(torch.eye(N), 2 * batch_size, 1).to(proj_feat1.device) 
@@ -204,17 +174,19 @@ class Loss:
         neg_sample_indicators = torch.ones((N, N))
         for i in range(batch_size // partition_size):
             neg_sample_indicators = neg_sample_indicators \
-                - torch.roll(torch.eye(N), i*partition_size, 1) \
-                - torch.roll(torch.eye(N), i*partition_size + batch_size, 1) \
-                - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+                                    - torch.roll(torch.eye(N), i*partition_size, 1) \
+                                    - torch.roll(torch.eye(N), i*partition_size + batch_size, 1) 
         neg_sample_indicators = neg_sample_indicators.to(featB.device)
+
+        # adding the corresponding positive to the denominator contaning negative samples
+        neg_sample_indicators = neg_sample_indicators + pos_sample_indicators
 
         numerator = torch.exp(similarity_matrix/self.tau)[pos_sample_indicators.bool()]      # shape: [2*batch_size]
         denominator = torch.sum((torch.exp(similarity_matrix/self.tau)*neg_sample_indicators), dim=1)     # shape: [2*batch_size]
 
-        # clamp to avoid division by zero
-        if (denominator < 1e-8).any():
-            denominator = torch.clamp(denominator, 1e-8)
+        # # clamp to avoid division by zero
+        # if (denominator < 1e-8).any():
+        #     denominator = torch.clamp(denominator, 1e-8)
 
         loss = torch.mean(-torch.log(numerator/denominator))
         return loss
@@ -246,61 +218,54 @@ class Loss:
         Returns:
             - loss (float): mean contrastive loss
         """
-        # Normalize the individual representations  (TODO: there should be 4 latents)
+        # Normalize the individual representations 
         batch_size = len(proj_feat1)
         z0 = F.normalize(proj_feat0, dim=1)     # projected features from the unaugmented image
         z1 = F.normalize(proj_feat1, dim=1)
         z2 = F.normalize(proj_feat2, dim=1)
-
-        # (vertical) stack one on top of the other  (TODO: change to 4)
+        N = 3*batch_size
+        
+        # (vertical) stack one on top of the other  
         representations = torch.cat([z0, z1, z2], dim=0)  # shape: (4*batch-size) x g1_out_dimension
 
         # get the full similarity matrix 
-        similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (4*batch-size) x (4*batch-size)
+        similarity_matrix = F.cosine_similarity(representations.unsqueeze(1), representations.unsqueeze(0), dim=2)  # shape: (3*N) x (3*N)
 
-        # initialize arrays to set the indices of the positive and negative samples (shape: (4*batch-size) x (4*batch-size))
-        # here, the positive sample strategy is similar to neg samples in GD-, except where there are 0s in GD- (denoting samples to not 
-        # constrast against), they become 1s in GD for positives
-        N = 3*batch_size
-        pos_sample_indicators_1 = torch.zeros(N)
-        pos_sample_indicators_2 = torch.zeros(N)
-        pos_sample_indicators_3 = torch.zeros(N)
+        pos_all = []
         for i in range(batch_size // partition_size):
-            pos_sample_indicators_1 = (pos_sample_indicators_1 + torch.roll(torch.eye(N), i*partition_size, 1)).to(proj_feat1.device) 
-            pos_sample_indicators_2 = (pos_sample_indicators_2 + torch.roll(torch.eye(N), i*partition_size+batch_size, 1)).to(proj_feat1.device) 
-            pos_sample_indicators_3 = (pos_sample_indicators_3 + torch.roll(torch.eye(N), i*partition_size+2*batch_size, 1)).to(proj_feat1.device) 
+            if i != 0:
+                pos_sample_indicator = torch.zeros(N, N)
+                pos_sample_indicator = pos_sample_indicator + torch.roll(torch.eye(N), i * partition_size, 1)
+                pos_all.append(pos_sample_indicator.to(proj_feat1.device))
 
-        # for i in range(batch_size // partition_size):
-        #     pos_sample_indicators = pos_sample_indicators 
-        #     + torch.roll(torch.eye(N), i*partition_size, 1) 
-        #     + torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
-        #     + torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
-        # pos_sample_indicators = pos_sample_indicators.to(proj_feat1.device)
-        
+            pos_sample_indicator = torch.zeros(N, N)
+            pos_sample_indicator = pos_sample_indicator + torch.roll(torch.eye(N), i * partition_size + batch_size, 1)
+            pos_all.append(pos_sample_indicator.to(proj_feat1.device))
+            pos_sample_indicator = torch.zeros(N, N)
+            pos_sample_indicator = pos_sample_indicator + torch.roll(torch.eye(N), i * partition_size + 2 * batch_size, 1)
+            pos_all.append(pos_sample_indicator.to(proj_feat1.device))
+
         # the negative sample indices remain unchanged from GD-'s negative sample indices
-        neg_sample_indicators = torch.ones(N)
+        neg_sample_indicators = torch.ones(N, N)
         for i in range(batch_size // partition_size):
-            neg_sample_indicators = neg_sample_indicators 
-            - torch.roll(torch.eye(N), i*partition_size, 1) 
-            - torch.roll(torch.eye(N), i*partition_size + batch_size, 1)
-            - torch.roll(torch.eye(N), i*partition_size + 2*batch_size, 1)
+            neg_sample_indicators = neg_sample_indicators \
+                                    - torch.roll(torch.eye(N), i * partition_size, 1) \
+                                    - torch.roll(torch.eye(N), i * partition_size + batch_size, 1) \
+                                    - torch.roll(torch.eye(N), i * partition_size + 2 * batch_size, 1)
         neg_sample_indicators = neg_sample_indicators.to(proj_feat1.device)
-        # # shorter version
-        # neg_sample_indicators = (~pos_sample_indicators.bool()).float() - torch.eye(N)
+        
+        loss = 0
+        # calculate the numerator by selecting the appropriate indices of the positive samples using the
+        # pos_sample_indicators matrix
+        for i in range(len(pos_all)):
+            numerator_pos = torch.exp(similarity_matrix)[pos_all[i].bool()]
+            # calculate the denominator by summing over each pair except for the diagonal elements
+            denominator = torch.sum((torch.exp(similarity_matrix) * (neg_sample_indicators+pos_all[i])), dim=1)
+            
+            loss += torch.mean(-torch.log(numerator_pos/denominator))
+            # print(loss, numerator_pos.shape, denominator.shape)
 
-        # calculate the numerator by selecting the appropriate indices of the positive samples using the pos_sample_indicators matrix
-        numerator_pos_1 = torch.exp(similarity_matrix/self.tau)[pos_sample_indicators_1.bool()]
-        numerator_pos_2 = torch.exp(similarity_matrix/self.tau)[pos_sample_indicators_2.bool()]
-        numerator_pos_3 = torch.exp(similarity_matrix/self.tau)[pos_sample_indicators_3.bool()]                
-        # calculate the denominator by summing over each pair except for the diagonal elements
-        denominator = torch.sum((torch.exp(similarity_matrix/self.tau)*neg_sample_indicators), dim=1)
-
-        # clamp to avoid division by zero
-        if (denominator < 1e-8).any():
-            denominator = torch.clamp(denominator, 1e-8)
-
-        # loss = torch.mean(-torch.log((numerator_pos_1 + numerator_pos_2 + numerator_pos_3)/denominator))
-        loss = torch.mean(-torch.log((numerator_pos_1 * numerator_pos_2 * numerator_pos_3)/denominator))
+        loss /= len(pos_all)
         return loss
 
     def compute(self, proj_feat0, proj_feat1, proj_feat2, partition_size, prediction, target=None, multiclass=False):
