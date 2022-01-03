@@ -24,8 +24,8 @@ from Dataset.dataset import DatasetRandom
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
-img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
-seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
+img_path = "/home/ssl_project/datasets/ACDC"
+seg_path = "/home/ssl_project/datasets/ACDC"
 
 parser = argparse.ArgumentParser(description="Supurvised learning")
 # all the arguments for the dataset, model, and training hyperparameters

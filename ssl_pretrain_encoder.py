@@ -27,10 +27,9 @@ from Dataset.dataset import DatasetGR, DatasetGD
 from Dataset.experiments_paper import data_init_acdc, data_init_prostate_md
 from loss import Loss, multiclass_dice_coeff
 
-# img_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
-# seg_path = "/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/ACDC"
-img_path='/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/Task05_Prostate/images'
-seg_path='/home/GRAMES.POLYMTL.CA/u114716/ssl_project/datasets/Task05_Prostate/labels'
+# define paths for the images and the segmentation labels
+img_path = "/home/ssl_project/datasets/ACDC"
+seg_path = "/home/ssl_project/datasets/ACDC"
 
 parser = argparse.ArgumentParser(description="Random-Random Strategy Run 3")
 
